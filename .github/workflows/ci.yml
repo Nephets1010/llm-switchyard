@@ -56,7 +56,7 @@ jobs:
 
       - name: 上传覆盖率报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-reports
           path: '**/target/site/jacoco/index.html'
@@ -64,7 +64,7 @@ jobs:
 
       - name: 上传计量精度报告（10 万条流量的实测误差值）
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: metering-precision-report
           path: '**/target/precision-report.*'

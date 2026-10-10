@@ -257,10 +257,13 @@ jobs:
 
       - name: 等待 mock-llm 就绪
         run: |
-          for i in $(seq 1 40); do
+          # 用计数器而非 for i in ...：`i` 未被使用会触发 actionlint 的 shellcheck SC2034
+          attempts=0
+          while [ "$attempts" -lt 40 ]; do
             if curl -fsS http://localhost:18081/__admin/health >/dev/null; then
               echo "mock-llm 就绪"; exit 0
             fi
+            attempts=$((attempts + 1))
             sleep 3
           done
           echo "::error::mock-llm 120s 内未就绪"; docker compose logs; exit 1

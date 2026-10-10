@@ -22,7 +22,18 @@ services:
     ports:
       - "18081:18081"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:18081/__admin/health"]
+      # ★ 用 bash 内建的 /dev/tcp 而不是 wget/curl：
+      #   eclipse-temurin:21-jre-jammy 里没有 wget 也没有 curl，而 Dockerfile
+      #   刻意不做 apt install（为了保持 runtime 镜像最小、无包管理器依赖）。
+      #   曾经写成 CMD wget，结果 healthcheck 永远 unhealthy，
+      #   sample 因 depends_on: service_healthy 而一直不启动 ——
+      #   日志只会显示「sample 一直在 restarting」，完全指不到 healthcheck 这一行。
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/localhost/18081 &&
+          printf 'GET /__admin/health HTTP/1.0\r\n\r\n' >&3 &&
+          head -1 <&3 | grep -q '200'
       interval: 5s
       timeout: 3s
       retries: 20
@@ -45,7 +56,17 @@ services:
       mock-llm:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:18080/actuator/health"]
+      # ★ 探测 /_switchyard/overview 而不是 /actuator/health：
+      #   sample 没有引入 spring-boot-starter-actuator，那个端点根本不存在（返回 404），
+      #   healthcheck 会永远 unhealthy。而 /_switchyard/overview 是 starter 自带的
+      #   控制台端点，真实存在且不依赖任何额外依赖。
+      #   同时它顺带证明了「网关已装配且可用」，比单纯探活更有价值。
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/localhost/18080 &&
+          printf 'GET /_switchyard/overview HTTP/1.0\r\n\r\n' >&3 &&
+          head -1 <&3 | grep -q '200'
       interval: 5s
       timeout: 3s
       retries: 20

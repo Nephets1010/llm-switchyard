@@ -26,7 +26,19 @@ import re
 import sys
 from typing import Any
 
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - 仅在缺依赖时触发
+    # ★ 不要让脚本以 ModuleNotFoundError + traceback 结束：
+    #   CI 上那种输出看不出「是没装依赖」还是「脚本本身坏了」，
+    #   排查的人得先想到 PyYAML 才查得到。
+    sys.stderr.write(
+        "缺少依赖 PyYAML。请先安装：\n"
+        "    python -m pip install PyYAML\n"
+        "若在 GitHub Actions 中运行，请确认 workflow 里已加：\n"
+        "    - run: python -m pip install PyYAML\n"
+    )
+    raise SystemExit(2) from None
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKFLOW_DIR = os.path.join(REPO_ROOT, ".github", "workflows")

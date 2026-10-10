@@ -116,8 +116,21 @@ jobs:
         with:
           python-version: '3.12'
 
+      # ★ 必须显式装 PyYAML：actions/setup-python 只保证 python 解释器可用，
+      #   不带任何第三方包。缺它时 `import yaml` 直接 ModuleNotFoundError，
+      #   而脚本的报错是「Traceback 之后就没了」，看不出是缺依赖还是脚本坏了。
+      - name: 安装脚本依赖
+        run: python -m pip install --upgrade pip && python -m pip install "PyYAML==6.0.2"
+
       - name: 静态校验（重复键 / env 作用域 / 本地脚本存在性）
         run: python tools/validate_workflows.py
+
+      - name: 构建上下文完整性（.dockerignore 是否把 Dockerfile 需要的东西排除了）
+        # ★ 这一步能在【提交前】发现 compose-smoke 会在 CI 上遇到的
+        #   '"pom.xml": not found' 失败 —— 那类报错的现场信息极不友好：
+        #   BuildKit 在算 cache checksum 阶段就失败，一条 RUN 都没执行，
+        #   日志里完全看不出是 .dockerignore 的问题。
+        run: python tools/check_dockerignore.py --selftest && python tools/check_dockerignore.py
 
       # actionlint 的解析器与 GitHub 服务端同源，是唯一能提前复现服务端
       # 解析行为的工具。它是二进制，直接从 release 页取。
@@ -232,8 +245,14 @@ jobs:
       - name: 校验 compose 文件语法
         run: docker compose config --quiet
 
+      # ★ --no-cache 不是为了「绕开缓存污染」，而是为了让失败可归因。
+      #   缓存命中时，如果 COPY 源在上下文里缺失，BuildKit 可能在算 checksum
+      #   阶段就报 '"pom.xml": not found'，而这个报错与「缓存来自别的 commit」
+      #   长得一模一样，无法区分。加 --no-cache 后每次都真算一遍，
+      #   失败就必然是本次上下文的问题。
+      #   代价是每次 CI 多花几分钟 —— 对一个 30 分钟的 job 可以接受。
       - name: 构建并启动
-        run: docker compose up --build -d
+        run: docker compose build --no-cache && docker compose up -d
 
       - name: 等待 mock-llm 就绪
         run: |

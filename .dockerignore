@@ -18,18 +18,29 @@ target/
 .github/
 
 # ---- 文档与契约：demo 镜像不需要 ----
+# ★ 这里【刻意不写】 '*.xml' / '!pom.xml' / '**/pom.xml' 这样的组合。
+#   它们的净效果是把【所有层级的 pom.xml 全部排除】，于是 Dockerfile 的
+#   COPY pom.xml 在构建上下文里找不到文件，BuildKit 在算 cache checksum 阶段
+#   就报 '"pom.xml": not found' —— 一条 RUN 都还没执行。
+#
+#   原因：'**/pom.xml' 里的 '**' 匹配【零个或多个】目录，所以它同时匹配
+#   根级的 'pom.xml' 与 'switchyard-core/pom.xml'；而它排在 '!pom.xml' 之后，
+#   按「后匹配者胜」的规则把刚恢复的文件又排除了。
+#   换句话说 '!pom.xml'（只恢复根级）被 '**/pom.xml'（排除所有层级）覆盖。
+#
+#   同理 '*.txt' 会吃掉 Dockerfile 需要的 LICENSE-HEADER.txt。
+#   目标：IDE 的 xml 配置文件（checkstyle.xml、pom.xml 之外的）体积都很小，
+#   为省几百 KB 而冒「构建直接失败」的风险不值得 —— 真要精简，删具体文件名。
+#
+#   改完 .dockerignore 请跑：python3 tools/check_dockerignore.py
+#   它会按 moby 的匹配语义验证 Dockerfile 的每个 COPY 源都还在上下文里。
 *.md
 !README.md
 docs/
 contract/
-*.txt
 
 # ---- CI / 工程配置 ----
 .editorconfig
-*.xml
-!pom.xml
-**/pom.xml
-checkstyle.xml
 
 # ---- 敏感配置 ----
 .env

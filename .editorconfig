@@ -1,0 +1,27 @@
+# Google Java Style (AOSP variant) + 通用文本约定
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.java]
+indent_size = 2
+max_line_length = 120
+
+[*.{yml,yaml,json,toml}]
+indent_size = 2
+
+[*.{xml,html}]
+indent_size = 2
+
+[*.md]
+# markdown 行尾双空格是换行语义，不能 trim
+trim_trailing_whitespace = false
+
+[*.sh]
+indent_size = 2

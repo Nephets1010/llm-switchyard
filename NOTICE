@@ -1,0 +1,37 @@
+llm-switchyard
+Copyright 2026 The llm-switchyard Authors.
+
+This product includes software developed at
+Nephets Open Source Studio (https://github.com/nephets).
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+This project depends on the following third-party software:
+
+1. Spring Boot 3.5.16 — Apache License 2.0
+2. Spring AI 1.1.8 — Apache License 2.0
+3. Jackson 2.19.x — Apache License 2.0
+4. Project Reactor 3.8.x — Apache License 2.0
+5. SnakeYAML 2.x — Apache License 2.0
+6. picocli 4.7.6 — Apache License 2.0
+
+Test-only dependencies:
+7. JUnit 5 — Eclipse Public License 1.0
+8. AssertJ 3.27.3 — Apache License 2.0
+9. WireMock 3.13.2 — MIT License
+
+The OpenAI, Anthropic, Ollama, DashScope, DeepSeek, ZhiPuAI, Moonshot, Doubao
+names and trademarks are the property of their respective owners. This project
+is not affiliated with or endorsed by any of them.

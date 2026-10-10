@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 The llm-switchyard Authors. Licensed under the Apache License, Version 2.0 (the "License"); see the
+  LICENSE file in the project root for the full license text.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.nephets</groupId>
+    <artifactId>llm-switchyard</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>switchyard-sample</artifactId>
+  <name>switchyard-sample</name>
+  <description>可运行 demo：同步对话 / 流式对话 / 并发配额拒绝三接口，全部指向 mock-llm，零 API Key 即可跑通计量与路由。</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.github.nephets</groupId>
+      <artifactId>switchyard-starter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.ai</groupId>
+      <artifactId>spring-ai-client-chat</artifactId>
+    </dependency>
+
+    <!-- 测试期把 mock-llm 拉进来做全链路冒烟，验证「零 API Key 也能跑通」 -->
+    <dependency>
+      <groupId>io.github.nephets</groupId>
+      <artifactId>switchyard-mock-llm</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      ★ 本项目的测试是唯一「两个 web 栈共存」的场景：sample 走 MVC，mock-llm 走 Netty。
+        classpath 上两者都在时，Spring Boot 的 WebApplicationType 判定<b>默认选 MVC</b>，
+        于是 mock-llm 也会以 MVC 启动 —— 而它的端点返回 Flux，MVC 没有对应的
+        HttpMessageConverter，结果 sample 侧只看到 ClosedChannelException（连不上）。
+
+        症状离真实原因（两个 web 栈打架）非常远，排查时极易误判成「端口没起」或「base-url 配错」，
+        本项目为此排查了三轮。这里显式声明 reactive 依赖，
+        并在 SampleSmokeTest 里用 spring.main.web-application-type=reactive 启动 mock-llm，
+        把这个配置形态固定下来并被测试覆盖。
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webflux</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.projectreactor.netty</groupId>
+      <artifactId>reactor-netty-http</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!--
+      ★ sample 与 mock-llm 都用 MVC（starter-web），测试期不需要任何 web 栈切换。
+        曾经的坑：mock-llm 原本用 WebFlux，它的 starter-webflux 传递依赖 starter-web；
+        两个 web 栈同时在 classpath 上时 Boot 默认选 MVC，mock-llm 于是以 MVC 启动，
+        而它的端点返回 Flux → MVC 没有对应 converter → sample 侧看到
+        ClosedChannelException（连不上）。症状离真实原因极远，排查了三轮。
+        现在两个模块统一 MVC + 同步 SSE 文本，这个冲突从根上消失了。
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <classifier>exec</classifier>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+  <properties>
+    <!-- 本模块有测试执行数据，执行覆盖率报告与门禁 -->
+    <jacoco.report.skip>false</jacoco.report.skip>
+  </properties>
+</project>

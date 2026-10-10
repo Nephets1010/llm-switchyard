@@ -1,0 +1,37 @@
+# ---- Maven ----
+target/
+.mvn/timing.properties
+
+# ---- IDE ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+
+# ---- Git ----
+.git/
+.gitignore
+.github/
+
+# ---- 文档与契约：demo 镜像不需要 ----
+*.md
+!README.md
+docs/
+contract/
+*.txt
+
+# ---- CI / 工程配置 ----
+.editorconfig
+*.xml
+!pom.xml
+**/pom.xml
+checkstyle.xml
+
+# ---- 敏感配置 ----
+.env
+.env.*
+**/application-local.yml

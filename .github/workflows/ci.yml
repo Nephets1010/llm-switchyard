@@ -1,0 +1,242 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同分支的新 push 直接取消旧构建，省 CI 配额
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MAVEN_VERSION: 3.9.9
+  JAVA_VERSION: '21'
+
+jobs:
+  # ============================================================
+  # Job 1：编译 + 单元测试 + 集成测试 + 覆盖率门禁
+  # ★ CI 零外部依赖：全部用 WireMock 与本仓 mock-llm，绝不调用真实 API、绝不产生费用
+  # ============================================================
+  verify:
+    name: verify (Java ${{ env.JAVA_VERSION }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: 打印工具链版本
+        run: java -version && ./mvnw -version
+
+      - name: 缓存 Maven 依赖
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: 离线依赖预热
+        run: ./mvnw -B -ntp dependency:go-offline -DexcludeArtifactIds=switchyard-core,switchyard-provider,switchyard-starter,switchyard-mock-llm || true
+
+      # 覆盖率门禁（core ≥ 80% / provider ≥ 65% / 其余 ≥ 60%）在 jacoco:check 里，低于阈值本步即失败
+      - name: 编译 + 测试 + 覆盖率门禁
+        run: ./mvnw -B -ntp clean verify -Dstyle.color=never
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: '**/target/site/jacoco/index.html'
+          retention-days: 14
+
+      - name: 上传计量精度报告（10 万条流量的实测误差值）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metering-precision-report
+          path: '**/target/precision-report.*'
+          retention-days: 90
+
+  # ============================================================
+  # Job 2：格式检查（spotless 同时负责 Apache-2.0 许可证头）
+  # ============================================================
+  spotless:
+    name: spotless
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      # ★ 许可证头也由 spotless 的 licenseHeader 规则校验（见父 pom 的 spotless 配置），
+      #   因此不需要单独跑 license-maven-plugin —— Spring Boot parent 已占用那个 artifactId，
+      #   且它的 check 目标名不同，跑起来只会报「Could not find goal 'check'」这种无关错误。
+      - name: 检查代码格式与 Apache-2.0 许可证头（google-java-format AOSP）
+        run: ./mvnw -B -ntp spotless:check -Dstyle.color=never
+
+
+  # ============================================================
+  # Job 3：契约一致性（§2.6）
+  # 三仓不共享 jar，只共享 contract/contract-v1.json 的语义。
+  # 这里跑 core 模块的 ContractSchemaTest，验证反射字段与契约文件逐字符一致。
+  # ============================================================
+  contract-consistency:
+    name: contract-consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: 契约字段 / 类型 / 枚举逐字符校验
+        run: ./mvnw -B -ntp -pl switchyard-core test -Dtest='ContractSchemaTest' -Dsurefire.failIfNoSpecifiedTests=false -Dstyle.color=never
+
+      - name: 校验契约文件是合法 JSON 且版本号受支持
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          with open('contract/contract-v1.json', encoding='utf-8') as f:
+              c = json.load(f)
+          assert c['contractVersion'] == 'v1', c['contractVersion']
+          need = {'CTX-001','USG-001','PRC-001','EVT-001','ERR-001','SPN-001'}
+          missing = need - set(c['contracts'])
+          assert not missing, f'契约缺失: {missing}'
+          for name, attrs in c['contracts'].items():
+              for a in attrs.get('customAttributes', []):
+                  assert a['name'].startswith('swy.'), f'{name} 的自定义属性必须用 swy. 前缀: {a["name"]}'
+          print('contract-v1.json 校验通过')
+          PY
+
+  # ============================================================
+  # Job 4：架构边界门禁
+  #   ① core 零 Spring 依赖  ② 依赖树不含另两个仓库的 groupId
+  # ============================================================
+  architecture-boundaries:
+    name: architecture-boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: core 模块禁止出现 Spring 依赖
+        run: ./mvnw -B -ntp -pl switchyard-core dependency:list -DoutputFile=/tmp/core-deps.txt -DincludeScope=compile
+        run: |
+          if grep -E 'org\.springframework' /tmp/core-deps.txt; then
+            echo "::error::core 模块出现 Spring 依赖，违反 ADR-0005 的零框架依赖硬约束"
+            exit 1
+          fi
+          echo "core 依赖树中无 org.springframework.*，边界完好"
+
+      - name: 禁止依赖另两个 LLM 基建仓库与 LangGraph4j
+        run: ./mvnw -B -ntp dependency:tree -DoutputFile=/tmp/full-tree.txt
+        run: |
+          if grep -E 'agentswitchyard|glasshouse|langgraph4j' /tmp/full-tree.txt; then
+            echo "::error::依赖树中出现另两个仓库或 LangGraph4j，违反 ADR-0003"
+            exit 1
+          fi
+          echo "依赖树干净：无跨仓依赖、无图编排引擎"
+
+  # ============================================================
+  # Job 5：docker compose 零 Key 冒烟（10 万条计量精度测试在 Job 1 已跑）
+  # ============================================================
+  compose-smoke:
+    name: compose-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 compose 文件语法
+        run: docker compose config --quiet
+
+      - name: 构建并启动
+        run: docker compose up --build -d
+
+      - name: 等待 mock-llm 就绪
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:18081/__admin/health >/dev/null; then
+              echo "mock-llm 就绪"; exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::mock-llm 120s 内未就绪"; docker compose logs; exit 1
+
+      - name: 同步对话（验证计量非零、成本非零）
+        run: |
+          curl -fsS -XPOST http://localhost:18080/demo/chat \
+            -H 'Content-Type: application/json' \
+            -d '{"prompt":"你好，请用一句话介绍你自己"}' | tee /tmp/chat.json
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/chat.json', encoding='utf-8'))
+          assert d['usage']['totalTokens'] > 0, '同步请求计量为 0'
+          assert float(d['cost']['amountCny']) > 0, '成本为 0'
+          print('同步计量 OK, totalTokens =', d['usage']['totalTokens'])
+          "
+
+      - name: 流式对话（PRD 痛点 4 的核心验收：流式计量不得为 0）
+        run: |
+          curl -fsS -N -XPOST http://localhost:18080/demo/chat/stream \
+            -H 'Content-Type: application/json' \
+            -d '{"prompt":"讲个笑话"}' > /tmp/stream.txt
+          cat /tmp/stream.txt
+          python3 -c "
+          import json
+          chunks = 0; usage = None
+          for line in open('/tmp/stream.txt', encoding='utf-8'):
+              line = line.strip()
+              if not line.startswith('data:'): continue
+              body = line[5:].strip()
+              if body == '[DONE]': break
+              d = json.loads(body); chunks += 1
+              if d.get('usage'): usage = d['usage']
+          assert chunks >= 3, f'流式 chunk 数 {chunks} < 3'
+          assert usage is not None and usage['totalTokens'] > 0, '流式计量为 0 —— 这是 PRD 痛点 4，必须修复'
+          print('流式计量 OK, chunks =', chunks, ', totalTokens =', usage['totalTokens'])
+          "
+
+      - name: 控制台 overview 非空
+        run: |
+          curl -fsS http://localhost:18080/_switchyard/overview | tee /tmp/overview.json
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/overview.json', encoding='utf-8'))
+          for k in ('cost','tokens','circuitBreakers'):
+              assert k in d, f'overview 缺少 {k}'
+          print('控制台 OK')
+          "
+
+      - name: 收集日志
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: 关闭环境
+        if: always()
+        run: docker compose down -v

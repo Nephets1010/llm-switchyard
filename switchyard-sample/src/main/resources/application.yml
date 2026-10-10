@@ -1,0 +1,111 @@
+# switchyard-sample demo 配置
+#
+# ★ 全部供应商都指向本地 mock-llm，因此零 API Key、零费用、CI 可跑。
+# ★ 想接真实供应商时，只需改 providers.*.base-url 与 api-key，业务代码一行不动。
+
+server:
+  port: ${SERVER_PORT:18080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: switchyard-sample
+  main:
+    banner-mode: off
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    async:
+      # SSE 需要；demo 里 mock 的响应很快，但真实模型可能慢
+      request-timeout: 180s
+
+llm:
+  switchyard:
+    enabled: true
+    default-route: default
+
+    routes:
+      default:
+        # mock-llm 暴露的是 OpenAI 兼容端点，所以用 openai 这个 providerId + 自定义 base-url
+        primary: openai/gpt-5-mini
+        fallbacks:
+          - deepseek/deepseek-chat
+          - dashscope/qwen-plus
+
+    providers:
+      openai:
+        api-key: "mock-key-not-used"
+        base-url: ${SWY_PROVIDER_BASE_URL:http://localhost:18081/v1}
+        timeout: 60s
+      deepseek:
+        api-key: "mock-key-not-used"
+        base-url: ${SWY_PROVIDER_BASE_URL:http://localhost:18081/v1}
+        timeout: 60s
+      dashscope:
+        api-key: "mock-key-not-used"
+        base-url: ${SWY_PROVIDER_BASE_URL:http://localhost:18081/v1}
+        timeout: 60s
+      ollama:
+        api-key: ""
+        base-url: ${SWY_PROVIDER_BASE_URL:http://localhost:18081}
+        timeout: 120s
+
+    metering:
+      cjk-per-token: 1.0
+      ascii-chars-per-token: 4.0
+      estimated-tokens-per-request: 1000
+
+    quota:
+      enabled: true
+      on-exceeded: FAIL_SOFT
+      default-tenant: demo-tenant
+      # demo 的默认配额故意给足，让 /demo/chat 不会一上来就被拒；
+      # 想看拒绝效果请调 /demo/quota-demo，它会自己把配额改成 200 token
+      reservation-ttl: 10m
+
+    retry:
+      enabled: true
+      max-attempts: 3
+      initial-backoff: 200ms
+      max-backoff: 2s
+      multiplier: 2.0
+      jitter: 0.2
+
+    circuit-breaker:
+      enabled: true
+      window-size: 20
+      failure-threshold: 0.5
+      open-duration: 30s
+
+    audit:
+      # RINGBUFFER：让 /_switchyard/audit 能查到记录，方便 demo 观察
+      type: RINGBUFFER
+      capture-payload: false
+      ring-buffer-capacity: 500
+
+    console:
+      enabled: true
+      base-path: /_switchyard
+
+    pricing-refresh-interval-ms: 300000
+
+logging:
+  level:
+    root: INFO
+    io.github.nephets.switchyard: INFO
+    # 想看每次调用的计量明细，把下面这行改成 DEBUG
+    io.github.nephets.switchyard.starter.RoutedChatModel: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%thread] %logger{40} - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true

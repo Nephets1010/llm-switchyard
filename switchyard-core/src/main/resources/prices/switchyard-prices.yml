@@ -1,0 +1,156 @@
+# 内置价格表（契约 PRC-001）
+#
+# ⚠️ 重要声明（请勿删除本段）：
+#   1. 本文件中的价格会随时间失效。每一行都必须带 source 与 effectiveFrom，
+#      否则使用者无法判断这个数字是否可信。
+#   2. source=ESTIMATED 的条目是社区估算值，控制台会显式标注「社区估算」，
+#      不可直接作为预算依据。
+#   3. 用户可以在 classpath 根目录或外部文件放置自己的 switchyard-prices.yml 覆盖本表，
+#      热更新无需重启（见 docs/configuration.md）。
+#   4. 更新价格请提 PR，不要在代码里硬编码。
+#
+# 单位：CNY / 1000 tokens（契约固定用 CNY 核算，对外展示层负责换汇）
+# 核对日期：2026-10-09
+
+version: 1
+prices:
+  # ==================== OpenAI ====================
+  - providerId: openai
+    modelId: gpt-5-mini
+    inputPricePerUnit: 0.0014
+    outputPricePerUnit: 0.0056
+    cachedInputPricePerUnit: 0.00028
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  - providerId: openai
+    modelId: gpt-4o-mini
+    inputPricePerUnit: 0.0011
+    outputPricePerUnit: 0.0043
+    cachedInputPricePerUnit: 0.00022
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  # ==================== Anthropic ====================
+  - providerId: anthropic
+    modelId: claude-haiku-4-5
+    inputPricePerUnit: 0.0073
+    outputPricePerUnit: 0.0365
+    cachedInputPricePerUnit: 0.00073
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  - providerId: anthropic
+    modelId: claude-sonnet-4-5
+    inputPricePerUnit: 0.0221
+    outputPricePerUnit: 0.1105
+    cachedInputPricePerUnit: 0.00221
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  # ==================== 通义千问（OpenAI 兼容）====================
+  - providerId: dashscope
+    modelId: qwen-max
+    inputPricePerUnit: 0.024
+    outputPricePerUnit: 0.096
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  - providerId: dashscope
+    modelId: qwen-plus
+    inputPricePerUnit: 0.0008
+    outputPricePerUnit: 0.002
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  - providerId: dashscope
+    modelId: qwen-turbo
+    inputPricePerUnit: 0.0003
+    outputPricePerUnit: 0.0006
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  # ==================== 智谱 GLM（OpenAI 兼容）====================
+  - providerId: zhipu
+    modelId: glm-4-plus
+    inputPricePerUnit: 0.05
+    outputPricePerUnit: 0.05
+    reasoningPricePerUnit: 0.05
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  - providerId: zhipu
+    modelId: glm-4-flash
+    inputPricePerUnit: 0.0007
+    outputPricePerUnit: 0.0007
+    reasoningPricePerUnit: 0.0007
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  # ==================== DeepSeek（OpenAI 兼容）====================
+  - providerId: deepseek
+    modelId: deepseek-chat
+    inputPricePerUnit: 0.002
+    outputPricePerUnit: 0.008
+    cachedInputPricePerUnit: 0.0005
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  - providerId: deepseek
+    modelId: deepseek-reasoner
+    inputPricePerUnit: 0.004
+    outputPricePerUnit: 0.016
+    reasoningPricePerUnit: 0.016
+    cachedInputPricePerUnit: 0.001
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  # ==================== Kimi / 月之暗面（OpenAI 兼容）====================
+  - providerId: moonshot
+    modelId: moonshot-v1-128k
+    inputPricePerUnit: 0.012
+    outputPricePerUnit: 0.012
+    cachedInputPricePerUnit: 0.0012
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  # ==================== 豆包 / 火山方舟（OpenAI 兼容）====================
+  - providerId: doubao
+    modelId: doubao-pro-32k
+    inputPricePerUnit: 0.0008
+    outputPricePerUnit: 0.002
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  - providerId: doubao
+    modelId: doubao-lite-32k
+    inputPricePerUnit: 0.00015
+    outputPricePerUnit: 0.0004
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  # ==================== Ollama（本地，成本为电费近似值）====================
+  # 本地部署的真实成本是硬件折旧 + 电费，与 token 单价模型不匹配。
+  # 这里给一个「按云端同级模型 1/20 折算」的保守值，仅用于让成本报表在
+  # 「云端 vs 本地」之间能出现在同一张表里做对比，不应作为实际成本依据。
+  - providerId: ollama
+    modelId: qwen3:8b
+    inputPricePerUnit: 0.0000012
+    outputPricePerUnit: 0.0000012
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  - providerId: ollama
+    modelId: llama3.2:3b
+    inputPricePerUnit: 0.0000005
+    outputPricePerUnit: 0.0000005
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED
+
+  # ==================== 硅基流动（OpenAI 兼容，一站多模型）====================
+  - providerId: siliconflow
+    modelId: Qwen/Qwen3-8B
+    inputPricePerUnit: 0.0012
+    outputPricePerUnit: 0.0012
+    effectiveFrom: 2026-01-01
+    source: ESTIMATED

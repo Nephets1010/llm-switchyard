@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 The llm-switchyard Authors. Licensed under the Apache License, Version 2.0 (the "License"); see the
+  LICENSE file in the project root for the full license text.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.nephets</groupId>
+    <artifactId>llm-switchyard</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>switchyard-core</artifactId>
+  <name>switchyard-core</name>
+  <description>纯逻辑层：Token 计量归一化（USG-001）、成本计算（PRC-001）、配额预留-对账、熔断重试、审计事件（EVT-001）。零 Spring 依赖。</description>
+
+  <!--
+    ★ 本模块严禁引入任何 org.springframework.* 依赖（ADR-0005 硬约束）。
+      CI 用 core 测试内的 CoreZeroSpringDependencyTest 做机器化校验：
+      扫描本模块全部已解析依赖坐标，出现 org.springframework.* 即失败。
+  -->
+  <dependencies>
+    <!-- 价格表 YAML 解析。刻意用 snakeyaml 而非 Spring 的 YamlPropertiesFactoryBean，保持零 Spring 依赖 -->
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- 仅测试期使用：ContractSchemaTest 解析 contract/contract-v1.json。
+         刻意限定 test scope —— 主源码仍不依赖 Jackson（ADR-0005 的零框架依赖边界） -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <!-- ★ 机器化守住 core 零 Spring 依赖边界：CI 中 unused/unused-declared 任一非空即失败 -->
+          <execution>
+            <id>analyze-no-unused-declared</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>analyze-only</goal>
+            </goals>
+            <configuration>
+              <ignoreNonCompile>true</ignoreNonCompile>
+              <failOnWarning>false</failOnWarning>
+              <outputXML>true</outputXML>
+              <outputFile>${project.build.directory}/dependency-analysis.xml</outputFile>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <exclude>**/package-info.java</exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <properties>
+    <jacoco.line.minimum>${jacoco.line.minimum.core}</jacoco.line.minimum>
+    <jacoco.report.skip>false</jacoco.report.skip>
+    </properties>
+</project>

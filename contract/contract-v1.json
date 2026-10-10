@@ -1,0 +1,191 @@
+{
+  "contractVersion": "v1",
+  "contractRevision": 1,
+  "family": "llm-infra",
+  "packagePrefix": "io.github.nephets",
+  "repositories": ["llm-switchyard", "agentswitchyard", "llm-glasshouse"],
+  "description": "LLM 基建三仓库共享契约。三仓不共享 jar，只共享本文件描述的字段名、单位、精度与枚举值。任何一方修改必须三仓同 PR。",
+  "conventions": {
+    "identifierStyle": "lowerCamelCase for JSON/字段名; UPPER_SNAKE_CASE for enum values",
+    "providerIdValues": ["openai", "anthropic", "dashscope", "deepseek", "zhipu", "moonshot", "doubao", "ollama"],
+    "errorCodePrefix": "SW_",
+    "customAttributePrefix": "swy.",
+    "currency": "CNY",
+    "moneyScaleInternal": 8,
+    "moneyScaleDisplay": 4,
+    "spanNameTemplate": "{gen_ai.operation.name} {target}"
+  },
+  "contracts": {
+    "CTX-001": {
+      "title": "TraceContext",
+      "javaType": "io.github.nephets.switchyard.core.trace.TraceContext",
+      "kind": "record",
+      "propagation": {
+        "httpHeaders": ["traceparent", "tracestate", "baggage"],
+        "mqHeaders": ["traceparent", "baggage"],
+        "inProcess": "TraceContext.current() 基于 InheritableThreadLocal（虚拟线程安全）",
+        "traceparentFormat": "00-{traceId}-{spanId}-{traceFlags}"
+      },
+      "fields": [
+        { "name": "traceId", "type": "String", "required": true, "unit": null, "pattern": "^[0-9a-f]{32}$" },
+        { "name": "spanId", "type": "String", "required": true, "unit": null, "pattern": "^[0-9a-f]{16}$" },
+        { "name": "parentSpanId", "type": "String", "required": false, "unit": null, "nullable": true, "pattern": "^[0-9a-f]{16}$" },
+        { "name": "traceFlags", "type": "String", "required": true, "unit": null, "enum": ["00", "01"] },
+        { "name": "traceState", "type": "String", "required": false, "unit": null, "nullable": true }
+      ]
+    },
+    "USG-001": {
+      "title": "Usage",
+      "javaType": "io.github.nephets.switchyard.core.usage.Usage",
+      "kind": "record",
+      "invariant": "totalTokens MUST be recomputed as inputTokens + outputTokens + reasoningTokens; copying the upstream total is FORBIDDEN",
+      "fields": [
+        { "name": "inputTokens", "type": "long", "required": true, "unit": "token" },
+        { "name": "outputTokens", "type": "long", "required": true, "unit": "token" },
+        { "name": "reasoningTokens", "type": "long", "required": true, "unit": "token" },
+        { "name": "cachedInputTokens", "type": "long", "required": true, "unit": "token" },
+        { "name": "totalTokens", "type": "long", "required": true, "unit": "token" },
+        { "name": "usageSource", "type": "UsageSource", "required": true, "unit": null },
+        { "name": "reasoningEstimated", "type": "boolean", "required": true, "unit": null },
+        { "name": "streamUsageReported", "type": "boolean", "required": true, "unit": null }
+      ],
+      "enums": {
+        "UsageSource": ["VENDOR_REPORTED", "ESTIMATED", "FALLBACK"]
+      },
+      "fieldMappings": {
+        "inputTokens": ["openai.prompt_tokens", "anthropic.input_tokens", "dashscope.input_tokens", "ollama.prompt_eval_count"],
+        "outputTokens": ["openai.completion_tokens", "anthropic.output_tokens", "dashscope.output_tokens", "ollama.eval_count"],
+        "cachedInputTokens": ["openai.prompt_tokens_details.cached_tokens"],
+        "reasoningTokens": ["deepseek.usage.completion_tokens_details.reasoning_tokens", "dashscope.usage.input_tokens_details", "qwen.thinking"]
+      },
+      "accuracyGate": {
+        "metric": "sum(inputTokens + outputTokens) vs vendor billing",
+        "trafficSize": 100000,
+        "maxErrorPercent": 0.5,
+        "streamingMustBeNonZero": true
+      }
+    },
+    "PRC-001": {
+      "title": "PriceEntry + CostCalculator",
+      "javaType": "io.github.nephets.switchyard.core.pricing.PriceEntry",
+      "kind": "record",
+      "formula": "billableInput=(inputTokens-cachedInputTokens)/1000*inputPrice + cachedInputTokens/1000*cachedPrice + outputTokens/1000*outputPrice + reasoningTokens/1000*reasoningPrice, scale=8 HALF_UP",
+      "fields": [
+        { "name": "providerId", "type": "String", "required": true, "unit": null },
+        { "name": "modelId", "type": "String", "required": true, "unit": null },
+        { "name": "currency", "type": "String", "required": true, "unit": null, "enum": ["CNY"] },
+        { "name": "unit", "type": "PriceUnit", "required": true, "unit": null },
+        { "name": "inputPricePerUnit", "type": "BigDecimal", "required": true, "unit": "CNY/1000token" },
+        { "name": "outputPricePerUnit", "type": "BigDecimal", "required": true, "unit": "CNY/1000token" },
+        { "name": "reasoningPricePerUnit", "type": "BigDecimal", "required": false, "unit": "CNY/1000token", "nullable": true, "fallbackTo": "outputPricePerUnit" },
+        { "name": "cachedInputPricePerUnit", "type": "BigDecimal", "required": false, "unit": "CNY/1000token", "nullable": true, "fallbackTo": "inputPricePerUnit" },
+        { "name": "effectiveFrom", "type": "LocalDate", "required": true, "unit": null },
+        { "name": "source", "type": "PriceSource", "required": true, "unit": null }
+      ],
+      "enums": {
+        "PriceUnit": ["PER_1K_TOKENS"],
+        "PriceSource": ["OFFICIAL", "ESTIMATED", "CUSTOM"]
+      },
+      "priceTableFile": "switchyard-prices.yml",
+      "priceTableHotReload": true,
+      "attributionErrorGate": { "maxErrorPercent": 1.0 }
+    },
+    "EVT-001": {
+      "title": "AuditEvent",
+      "javaType": "io.github.nephets.switchyard.core.audit.AuditEvent",
+      "kind": "record",
+      "nullPlaceholderForbidden": "缺失维度必须为 null，禁止填 \"unknown\"，否则污染归因统计",
+      "fields": [
+        { "name": "eventType", "type": "AuditEventType", "required": true, "unit": null },
+        { "name": "traceId", "type": "String", "required": true, "unit": null },
+        { "name": "spanId", "type": "String", "required": true, "unit": null },
+        { "name": "occurredAt", "type": "Instant", "required": true, "unit": "ISO-8601 UTC millis" },
+        { "name": "tenantId", "type": "String", "required": false, "unit": null, "nullable": true },
+        { "name": "bizLine", "type": "String", "required": false, "unit": null, "nullable": true },
+        { "name": "feature", "type": "String", "required": false, "unit": null, "nullable": true },
+        { "name": "promptVersion", "type": "String", "required": false, "unit": null, "nullable": true },
+        { "name": "agentId", "type": "String", "required": false, "unit": null, "nullable": true },
+        { "name": "flowInstanceId", "type": "String", "required": false, "unit": null, "nullable": true },
+        { "name": "stepId", "type": "String", "required": false, "unit": null, "nullable": true },
+        { "name": "stepSeq", "type": "Integer", "required": false, "unit": null, "nullable": true },
+        { "name": "usage", "type": "Usage", "required": true, "unit": null },
+        { "name": "costAmount", "type": "BigDecimal", "required": true, "unit": "CNY" },
+        { "name": "costCurrency", "type": "String", "required": true, "unit": null, "enum": ["CNY"] },
+        { "name": "payloadDigest", "type": "String", "required": true, "unit": null, "pattern": "^sha256:[0-9a-f]{64}$" },
+        { "name": "payloadFull", "type": "String", "required": false, "unit": null, "nullable": true }
+      ],
+      "enums": {
+        "AuditEventType": ["MODEL_CALL", "TOOL_CALL", "RETRIEVAL", "APPROVAL", "FLOW_STEP"]
+      }
+    },
+    "ERR-001": {
+      "title": "ErrorCode",
+      "javaType": "io.github.nephets.switchyard.core.ErrorCode",
+      "kind": "enum",
+      "responseBodyShape": ["code", "message", "retryable", "traceId", "timestamp"],
+      "values": [
+        { "name": "SW_QUOTA_EXCEEDED", "httpStatus": 429, "retryable": false, "semantics": "配额不足，fail-soft 返回友好提示，不抛异常" },
+        { "name": "SW_PROVIDER_UNAVAILABLE", "httpStatus": 503, "retryable": true, "semantics": "上游 provider 不可用或熔断中" },
+        { "name": "SW_PROVIDER_TIMEOUT", "httpStatus": 504, "retryable": true, "semantics": "上游超时" },
+        { "name": "SW_MODEL_UNAVAILABLE", "httpStatus": 503, "retryable": true, "semantics": "已配置降级链但全部失败" },
+        { "name": "SW_CONTENT_FILTERED", "httpStatus": 422, "retryable": false, "semantics": "内容审核拦截" },
+        { "name": "SW_BAD_REQUEST", "httpStatus": 400, "retryable": false, "semantics": "参数错误，禁止重试" },
+        { "name": "SW_TOOL_DENIED", "httpStatus": 403, "retryable": false, "semantics": "工具未注册或超白名单" },
+        { "name": "SW_APPROVAL_REQUIRED", "httpStatus": 202, "retryable": false, "semantics": "需人工审批（仓库②专用语义）" },
+        { "name": "SW_APPROVAL_DENIED", "httpStatus": 403, "retryable": false, "semantics": "审批拒绝" },
+        { "name": "SW_INTERNAL", "httpStatus": 500, "retryable": false, "semantics": "内部错误" }
+      ]
+    },
+    "SPN-001": {
+      "title": "Span 命名与属性约定",
+      "definedBy": "llm-glasshouse",
+      "followedBy": ["llm-switchyard", "agentswitchyard"],
+      "spanNameTemplate": "{gen_ai.operation.name} {target}",
+      "operations": [
+        { "operationName": "chat", "target": "modelId", "example": "chat deepseek-chat" },
+        { "operationName": "invoke_agent", "target": "agentId", "example": "invoke_agent planner" },
+        { "operationName": "execute_tool", "target": "toolName", "example": "execute_tool kb_lookup" },
+        { "operationName": "retrieve", "target": "retrieverName", "example": "retrieve pgvector_kb" },
+        { "operationName": "approval", "target": "approverRole", "example": "approval credit_officer" }
+      ],
+      "otelGenAiAttributes": [
+        "gen_ai.operation.name",
+        "gen_ai.provider.name",
+        "gen_ai.request.model",
+        "gen_ai.response.model",
+        "gen_ai.response.finish_reasons[]",
+        "gen_ai.request.temperature",
+        "gen_ai.request.max_tokens",
+        "gen_ai.request.stream",
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens"
+      ],
+      "deprecatedAliasesRedundantForOneRelease": [
+        "gen_ai.usage.prompt_tokens",
+        "gen_ai.usage.completion_tokens"
+      ],
+      "customAttributes": [
+        { "name": "swy.tenant.id", "type": "string", "in": ["switchyard", "agentswitchyard", "glasshouse"] },
+        { "name": "swy.biz.line", "type": "string", "in": ["switchyard", "agentswitchyard", "glasshouse"] },
+        { "name": "swy.feature", "type": "string", "in": ["switchyard", "agentswitchyard", "glasshouse"] },
+        { "name": "swy.prompt.version", "type": "string", "in": ["switchyard", "agentswitchyard", "glasshouse"] },
+        { "name": "swy.agent.id", "type": "string", "in": ["agentswitchyard", "glasshouse"] },
+        { "name": "swy.agent.version", "type": "string", "in": ["agentswitchyard", "glasshouse"] },
+        { "name": "swy.flow.instance.id", "type": "string", "in": ["agentswitchyard"] },
+        { "name": "swy.step.id", "type": "string", "in": ["agentswitchyard"] },
+        { "name": "swy.step.seq", "type": "int", "in": ["agentswitchyard"] },
+        { "name": "swy.step.kind", "type": "string", "in": ["agentswitchyard"], "enum": ["LLM", "TOOL", "RULE", "HUMAN", "COMPENSATE"] },
+        { "name": "swy.usage.source", "type": "string", "in": ["switchyard", "glasshouse"], "enum": ["VENDOR_REPORTED", "ESTIMATED", "FALLBACK"] },
+        { "name": "swy.usage.stream_reported", "type": "boolean", "in": ["switchyard", "glasshouse"] },
+        { "name": "swy.usage.reasoning_tokens", "type": "int", "in": ["switchyard", "glasshouse"] },
+        { "name": "swy.usage.cached_input_tokens", "type": "int", "in": ["switchyard", "glasshouse"] },
+        { "name": "swy.cost.amount", "type": "double", "in": ["switchyard", "glasshouse"] },
+        { "name": "swy.cost.currency", "type": "string", "in": ["switchyard", "glasshouse"] },
+        { "name": "swy.price.source", "type": "string", "in": ["switchyard", "glasshouse"], "enum": ["OFFICIAL", "ESTIMATED", "CUSTOM"] },
+        { "name": "swy.approval.state", "type": "string", "in": ["agentswitchyard"], "enum": ["PENDING", "APPROVED", "REJECTED", "TIMEOUT"] },
+        { "name": "swy.payload.digest", "type": "string", "in": ["switchyard", "agentswitchyard", "glasshouse"] },
+        { "name": "swy.payload.full", "type": "string", "in": ["switchyard", "agentswitchyard", "glasshouse"] }
+      ]
+    }
+  }
+}

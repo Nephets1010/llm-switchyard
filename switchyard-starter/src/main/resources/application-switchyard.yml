@@ -1,0 +1,122 @@
+# llm-switchyard 示例配置
+#
+# ★ 最小可用配置：只需 routes + providers 两段，网关即可工作。
+# ★ API Key 请用环境变量注入，不要写进配置文件（本示例用 ${...} 占位）。
+
+llm:
+  switchyard:
+    enabled: true
+    default-route: default
+
+    # ---------- 路由：主模型 + 有序降级链 ----------
+    routes:
+      default:
+        # 主模型。格式 providerId/modelId
+        primary: openai/gpt-5-mini
+        # 降级链：主模型失败（重试耗尽或熔断打开）后依次尝试
+        # 顺序即策略：把「更便宜但更慢」的放在前面，把「更贵但更可靠」的放在后面
+        fallbacks:
+          - deepseek/deepseek-chat
+          - dashscope/qwen-plus
+          - ollama/qwen3:8b
+
+      # 敏感数据专用路由：只走本地模型，数据不出内网
+      local-only:
+        primary: ollama/qwen3:8b
+        fallbacks: []
+
+    # ---------- 供应商：API Key 与端点 ----------
+    providers:
+      openai:
+        api-key: ${OPENAI_API_KEY:}
+        # base-url 不填时用内置默认（https://api.openai.com）
+        # 走代理或私有网关时覆盖它，例如 https://my-gateway.corp/openai
+        base-url: ${OPENAI_BASE_URL:}
+        timeout: 60s
+
+      deepseek:
+        api-key: ${DEEPSEEK_API_KEY:}
+        timeout: 60s
+
+      dashscope:
+        api-key: ${DASHSCOPE_API_KEY:}
+        # 通义千问走 OpenAI 兼容端点，零额外依赖
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+      # 本地 Ollama 不需要 apiKey
+      ollama:
+        api-key: ""
+        base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+        # 本地模型首 token 更慢，超时给足
+        timeout: 300s
+
+    # ---------- 计量 ----------
+    metering:
+      # 中文 1 字 ≈ 1 token；ASCII 4 字符 ≈ 1 token
+      # 换成 tiktoken 只需实现 TokenEstimator 接口并注册为 Bean
+      cjk-per-token: 1.0
+      ascii-chars-per-token: 4.0
+      # 无法预估 prompt 时的兜底预留量
+      estimated-tokens-per-request: 1000
+
+    # ---------- 配额（预留-对账-熔断）----------
+    quota:
+      enabled: true
+      # 超限行为：FAIL_SOFT 返回 429 业务响应不抛异常；TRIP_BREAKER 额外触发熔断
+      on-exceeded: FAIL_SOFT
+      default-tenant: _default
+      # 预留有效期；超时未结算的预留会被自动回收，防止额度泄漏
+      reservation-ttl: 10m
+
+    # ---------- 语义化重试（只对 429/5xx/超时重试）----------
+    retry:
+      enabled: true
+      max-attempts: 3
+      initial-backoff: 200ms
+      max-backoff: 2s
+      multiplier: 2.0
+      # 抖动：防止 100 个并发请求在同一毫秒重试形成风暴
+      jitter: 0.2
+
+    # ---------- 熔断 ----------
+    circuit-breaker:
+      enabled: true
+      # 滑动窗口大小
+      window-size: 20
+      # 窗口内失败率达到该比例即打开
+      failure-threshold: 0.5
+      # 打开后持续多久转半开
+      open-duration: 30s
+
+    # ---------- 审计 ----------
+    audit:
+      # LOGGING（默认，结构化 JSON 日志）/ RINGBUFFER（内存环形缓冲）/ NONE（关闭）
+      type: LOGGING
+      # ★ 默认不落 prompt 原文：金融/客服场景的 prompt 里常含身份证与手机号
+      # 需要留痕时改为 true，并自行完成脱敏
+      capture-payload: false
+      ring-buffer-capacity: 1000
+
+    # ---------- 控制台 JSON 端点 ----------
+    console:
+      enabled: true
+      base-path: /_switchyard
+
+    # 外部价格表路径；配置后每 5 分钟热更新，改价无需重启
+    # pricing-file: /etc/switchyard/switchyard-prices.yml
+    pricing-refresh-interval-ms: 300000
+
+# 虚拟线程：流式与并发请求不被线程数限制（Spring Boot 3.2+）
+spring:
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always

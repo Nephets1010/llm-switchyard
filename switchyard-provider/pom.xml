@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 The llm-switchyard Authors. Licensed under the Apache License, Version 2.0 (the "License"); see the
+  LICENSE file in the project root for the full license text.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.nephets</groupId>
+    <artifactId>llm-switchyard</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>switchyard-provider</artifactId>
+  <name>switchyard-provider</name>
+  <description>供应商适配层：OpenAiCompatibleProvider（覆盖 openai/通义/智谱/deepseek/moonshot/doubao 6 家）、AnthropicProvider、OllamaProvider 三个适配器 + ProviderCatalog。</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.github.nephets</groupId>
+      <artifactId>switchyard-core</artifactId>
+    </dependency>
+
+    <!-- ★ 用 JDK 内置 HttpClient + Jackson 自行实现 wire 层解析，不复用 Spring AI 的 provider starter。
+         原因（写进 ADR-0006）：计量精度是本项目护城河，必须 100% 掌控 usage 解析。
+         Spring AI 的 OpenAiApi 把 prompt_tokens_details.cached_tokens 与 reasoning tokens 直接丢弃，
+         流式末尾 usage chunk 也不暴露 —— 这恰好是 PRD 痛点 4 与 USG-001 契约要求精度的部分。
+         代价是我们要自己维护 wire DTO；收益是零依赖漂移、零版本锁定、6 家行为可逐字节断言。 -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!-- ChatModel SPI 与 ChatClient：RoutedChatModel 要实现它，业务侧才能零损失使用 -->
+    <dependency>
+      <groupId>org.springframework.ai</groupId>
+      <artifactId>spring-ai-client-chat</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.projectreactor</groupId>
+      <artifactId>reactor-core</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <properties>
+    <!-- 本模块有测试执行数据，执行覆盖率报告与门禁 -->
+    <jacoco.report.skip>false</jacoco.report.skip>
+    <jacoco.line.minimum>${jacoco.line.minimum.provider}</jacoco.line.minimum>
+    </properties>
+</project>

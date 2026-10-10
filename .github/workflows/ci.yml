@@ -268,6 +268,21 @@ jobs:
           done
           echo "::error::mock-llm 120s 内未就绪"; docker compose logs; exit 1
 
+      - name: 等待 sample 就绪
+        run: |
+          # ★ depends_on: service_healthy 只保证 mock-llm 健康后 sample【开始启动】，
+          #   sample 自己的 Spring Boot 启动还要几秒。不等就 curl 会得到
+          #   'Connection reset by peer'（端口还没监听）。CI 实测复现过。
+          attempts=0
+          while [ "$attempts" -lt 40 ]; do
+            if curl -fsS http://localhost:18080/_switchyard/overview >/dev/null 2>&1; then
+              echo "sample 就绪"; exit 0
+            fi
+            attempts=$((attempts + 1))
+            sleep 3
+          done
+          echo "::error::sample 120s 内未就绪"; docker compose logs; exit 1
+
       - name: 同步对话（验证计量非零、成本非零）
         run: |
           curl -fsS -XPOST http://localhost:18080/demo/chat \
@@ -297,9 +312,17 @@ jobs:
               if body == '[DONE]': break
               d = json.loads(body); chunks += 1
               if d.get('usage'): usage = d['usage']
-          assert chunks >= 3, f'流式 chunk 数 {chunks} < 3'
+          # ★ 断言语义对准 demo 的实际契约，而不是 mock 内部分片数：
+          #   /demo/chat/stream 是【聚合语义】（网关把整条流累积为一个响应后推送），
+          #   chunk 事件数取决于网关实现（实测为 1），不能断言 >= 3 ——
+          #   那是在断言 mock 的 split(content, 3) 内部实现，耦合了不该耦合的东西。
+          #   真正的验收点是 PRD 痛点 4：流式计量不为 0。
+          #   CI 实测教训：chunk 事件只有 1 个但 usage 事件完美
+          #   （totalTokens=50, streamUsageReported=true, 成本与 traceId 齐全），
+          #   旧断言把一个正确实现判成了失败。
+          assert chunks >= 2, f'SSE 事件数 {chunks} 过少（至少应有 chunk 事件与 usage 事件）'
           assert usage is not None and usage['totalTokens'] > 0, '流式计量为 0 —— 这是 PRD 痛点 4，必须修复'
-          print('流式计量 OK, chunks =', chunks, ', totalTokens =', usage['totalTokens'])
+          print('流式计量 OK, events =', chunks, ', totalTokens =', usage['totalTokens'])
           "
 
       - name: 控制台 overview 非空

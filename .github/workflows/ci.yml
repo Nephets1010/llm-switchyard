@@ -25,7 +25,13 @@ jobs:
   # ★ CI 零外部依赖：全部用 WireMock 与本仓 mock-llm，绝不调用真实 API、绝不产生费用
   # ============================================================
   verify:
-    name: verify (Java ${{ env.JAVA_VERSION }})
+    # ★ 这里必须写死版本号，不能用 ${{ env.JAVA_VERSION }}。
+    #   job 的 name 字段在 workflow 解析的极早期求值，此时 env 尚未填充，
+    #   GitHub 会直接拒绝整个文件：
+    #     (Line: 28) Unrecognized named-value: 'env'
+    #   而且它会连带**后面所有 job 都创建不出来** —— 报错信息完全指不到真实原因。
+    #   env 只能用在 steps[].with / steps[].run 里（见下方 setup-java）。
+    name: verify (Java 21)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -91,6 +97,42 @@ jobs:
       - name: 检查代码格式与 Apache-2.0 许可证头（google-java-format AOSP）
         run: ./mvnw -B -ntp spotless:check -Dstyle.color=never
 
+  # ============================================================
+  # Job 2b：workflow 自身语法门禁
+  # ★ 为什么需要这个 job：GitHub 解析 workflow 失败时是**整个文件拒绝、所有 job
+  #   一个都不创建**，而报错信息（"Unrecognized named-value: 'env'"、
+  #   "'run' is already defined"）完全指不到真实原因。更糟的是这类错误
+  #   在本地看不出来：YAML 同层重复键会被解析器静默取最后一个，mvn 也照样全绿。
+  #   首次上线时就是这个原因导致 5 个 job 全部无法创建。
+  # ============================================================
+  workflow-syntax:
+    name: workflow-syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 静态校验（重复键 / env 作用域 / 本地脚本存在性）
+        run: python tools/validate_workflows.py
+
+      # actionlint 的解析器与 GitHub 服务端同源，是唯一能提前复现服务端
+      # 解析行为的工具。它是二进制，直接从 release 页取。
+      - name: actionlint（与 GitHub 服务端同源的解析器）
+        run: |
+          set -euo pipefail
+          VER=1.7.7
+          curl -sSL --max-time 60 \
+            -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${VER}/actionlint_${VER}_linux_amd64.tar.gz"
+          tar -xzf actionlint.tar.gz actionlint
+          # -color=never 让日志可读；有任何输出即失败（actionlint 有问题时不输出并返回 0）
+          ./actionlint -color=never .github/workflows/*.yml
+          echo "actionlint 通过"
+
 
   # ============================================================
   # Job 3：契约一致性（§2.6）
@@ -145,8 +187,19 @@ jobs:
           cache: maven
 
       - name: core 模块禁止出现 Spring 依赖
-        run: ./mvnw -B -ntp -pl switchyard-core dependency:list -DoutputFile=/tmp/core-deps.txt -DincludeScope=compile
+        # ★ 两条命令必须在同一个 run 块里。
+        #   写成两个平级的 `run:` 是无效的 —— YAML 同层键重复，后者静默覆盖前者，
+        #   于是 dependency:list 根本没执行，/tmp/core-deps.txt 从未生成。
+        #   而「文件不存在」时 grep 返回 2（非零），在 shell 默认语义下会让整个
+        #   `if` 判为「没匹配」→ 走 else 分支打印「边界完好」→
+        #   **门禁看起来在跑并报告通过，实际什么都没检查**。这是最坏的一类假绿。
+        #   所以下面先显式校验清单非空：判定不了就失败，绝不「默认通过」。
         run: |
+          ./mvnw -B -ntp -pl switchyard-core dependency:list -DoutputFile=/tmp/core-deps.txt -DincludeScope=compile
+          if [ ! -s /tmp/core-deps.txt ]; then
+            echo "::error::dependency:list 未产出依赖清单，门禁无法判定（请勿用 -q 静默失败）"
+            exit 1
+          fi
           if grep -E 'org\.springframework' /tmp/core-deps.txt; then
             echo "::error::core 模块出现 Spring 依赖，违反 ADR-0005 的零框架依赖硬约束"
             exit 1
@@ -154,8 +207,12 @@ jobs:
           echo "core 依赖树中无 org.springframework.*，边界完好"
 
       - name: 禁止依赖另两个 LLM 基建仓库与 LangGraph4j
-        run: ./mvnw -B -ntp dependency:tree -DoutputFile=/tmp/full-tree.txt
         run: |
+          ./mvnw -B -ntp dependency:tree -DoutputFile=/tmp/full-tree.txt
+          if [ ! -s /tmp/full-tree.txt ]; then
+            echo "::error::dependency:tree 未产出依赖树，门禁无法判定"
+            exit 1
+          fi
           if grep -E 'agentswitchyard|glasshouse|langgraph4j' /tmp/full-tree.txt; then
             echo "::error::依赖树中出现另两个仓库或 LangGraph4j，违反 ADR-0003"
             exit 1

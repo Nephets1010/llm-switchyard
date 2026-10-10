@@ -43,7 +43,12 @@ jobs:
         run: ./mvnw -B -ntp -Prelease package -Dgpg.skip=true -Dstyle.color=never
 
       - name: 上传到 Maven Central（仅正式 tag 且非 dry-run）
-        if: startsWith(github.ref, 'refs/tags/v') && ${{ inputs.dry-run != true }}
+        # ★ 不要写成 `if: cond && ${{ ... }}`。
+        #   if 条件本身就是表达式环境，写成混合形式时 actionlint 报
+        #   "always evaluated to true because extra characters are around ${{ }}"，
+        #   且语义在部分上下文中会与预期不符。
+        #   正确写法：整个条件放进一个 ${{ }} 里。
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && inputs.dry-run != true }}
         run: ./mvnw -B -ntp -Prelease deploy -Dstyle.color=never
 
       - name: 发布 GitHub Release

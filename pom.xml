@@ -105,8 +105,16 @@
 
       之所以不用 ${project.build.directory}：本仓库路径含中文，在 Windows 上必被截断；
       之所以不用 ${java.io.tmpdir}：它解析到用户目录，同样可能含中文。
-      CI（Linux）与本地都可用 -Djacoco.dest.dir=<纯 ASCII 路径> 覆盖。
       每个模块用 artifactId 命名，避免多模块互相覆盖。
+
+      ★★ 真正的坑是这个目录【在项目之外】，mvn clean 不会清它，于是上一轮遗留的
+        .exec 会被下一轮的 report/check 读进去，得出「上一轮的覆盖率」。
+        本项目实测踩过：switchyard-starter 的测试早已被删光（0 个测试类），
+        但因为 11 小时前遗留的 starter.exec 还在，check 拿它算出 45.1% 并报
+        「覆盖率 45% < 60%」—— 一个既真实又无意义的失败。
+        对策是每次构建在 initialize 阶段先删掉自己的 .exec
+        （见下方 maven-antrun-plugin 配置），保证覆盖率只反映本次构建。
+        CI（Linux）与本地都可用 -Djacoco.dest.dir=<纯 ASCII 路径> 覆盖。
     -->
     <jacoco.dest.dir>C:/Users/Public/swy-jacoco/${project.artifactId}.exec</jacoco.dest.dir>
     <!-- 父 pom（packaging=pom）没有测试执行数据，显式跳过 report/check -->
@@ -278,6 +286,45 @@
     </pluginManagement>
 
     <plugins>
+      <!--
+        ==== 每次构建先清空本模块的 jacoco .exec ====
+        ★ 为什么必须显式清：jacoco.dest.dir 在项目之外（为了绕开中文路径），
+          mvn clean 管不到那里。残留的 .exec 会被下一轮的 report/check 读进去，
+          于是覆盖率反映的是【上一次】构建 —— 既可能是早已删除的测试留下的
+          （本项目实测：starter 测试全删了，却因 11 小时前的残留算出 45.1%），
+          也可能让本次的新测试「白写」（数据被旧数据稀释）。
+          覆盖率报告的唯一价值是反映当前代码，混入历史数据等于毁掉它。
+
+          用 antrun 的 delete 而不是 build-helper：antrun 能按文件精确删除，
+          而 build-helper 只擅长生成源码目录。
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>clean-stale-jacoco-data</id>
+            <!--
+              ★ 必须绑在 initialize（早于 prepare-agent），否则本轮 agent
+                写出的数据会被自己删掉。
+            -->
+            <phase>initialize</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <target>
+                <!--
+                  failonerror=false：CI 上是 Linux 路径（/tmp/...），
+                  删一个不存在的文件不该让构建失败。
+                -->
+                <delete file="${jacoco.dest.dir}" failonerror="false" quiet="true"/>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
       <!-- ==== 强制 Java 21 与 Maven 版本，避免用错 JDK 得到「能编译但跑不起来」的产物 ==== -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

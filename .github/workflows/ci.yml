@@ -142,8 +142,9 @@ jobs:
             -o actionlint.tar.gz \
             "https://github.com/rhysd/actionlint/releases/download/v${VER}/actionlint_${VER}_linux_amd64.tar.gz"
           tar -xzf actionlint.tar.gz actionlint
-          # -color=never 让日志可读；有任何输出即失败（actionlint 有问题时不输出并返回 0）
-          ./actionlint -color=never .github/workflows/*.yml
+          # actionlint 的 -color 是布尔开关，不接受 '=never' 这种写法（会当成非法参数并打印帮助）。
+          # 禁用颜色用 -no-color。有任何输出即失败（actionlint 发现问题时输出并返回非 0）。
+          ./actionlint -no-color .github/workflows/*.yml
           echo "actionlint 通过"
 
 

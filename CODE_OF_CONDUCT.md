@@ -39,7 +39,7 @@ issue、PR 及其它社区互动。
 
 ## 强制执行
 
-通过 GitHub 私信联系 [@nephets](https://github.com/nephets) 或在提交 issue 时注明。
+通过 GitHub 私信联系 [@nephets](https://github.com/Nephets1010) 或在提交 issue 时注明。
 所有投诉都会被审查与调查。
 
 **维护者有义务 respect 隐私与安全**：

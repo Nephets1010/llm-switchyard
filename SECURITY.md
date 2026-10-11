@@ -10,7 +10,7 @@
 
 **请不要用 GitHub Issue 报告安全问题。**
 
-请通过 GitHub 的 [Private vulnerability reporting](https://github.com/nephets/llm-switchyard/security/advisories/new)
+请通过 GitHub 的 [Private vulnerability reporting](https://github.com/Nephets1010/llm-switchyard/security/advisories/new)
 提交，或邮件联系维护者。
 
 我们会在收到报告后 **48 小时内**确认收到，**7 个工作日内**给出修复计划或缓解方案。

@@ -5,7 +5,7 @@
 ## 本地环境
 
 ```bash
-git clone https://github.com/nephets/llm-switchyard.git
+git clone https://github.com/Nephets1010/llm-switchyard.git
 cd llm-switchyard
 ./mvnw clean verify
 ```

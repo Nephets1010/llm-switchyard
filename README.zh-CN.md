@@ -9,7 +9,7 @@ and quality, meter every token, and never let a provider outage take your busine
 
 [English](README.md) | **简体中文**
 
-[![CI](https://github.com/nephets/llm-switchyard/actions/workflows/ci.yml/badge.svg)](https://github.com/nephets/llm-switchyard/actions/workflows/ci.yml)
+[![CI](https://github.com/Nephets1010/llm-switchyard/actions/workflows/ci.yml/badge.svg)](https://github.com/Nephets1010/llm-switchyard/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-brightgreen.svg)](https://spring.io/projects/spring-boot)
@@ -172,7 +172,7 @@ ChatClient chatClient(SwitchyardRouter router) {
 ## 7. 一键体验（零 API Key、零费用）
 
 ```bash
-git clone https://github.com/nephets/llm-switchyard.git
+git clone https://github.com/Nephets1010/llm-switchyard.git
 cd llm-switchyard
 docker compose up --build
 ```
@@ -320,7 +320,7 @@ curl -XPOST localhost:18081/__admin/reset
 ## 12. 参与贡献
 
 ```bash
-git clone https://github.com/nephets/llm-switchyard.git
+git clone https://github.com/Nephets1010/llm-switchyard.git
 cd llm-switchyard
 ./mvnw clean verify     # 五个 check 全绿才能提交
 ```

@@ -12,7 +12,7 @@
  *   <li>框架升级（Boot 3.5 → 4.1、Spring AI 1.1 → 2.x）时，改动被限制在 {@code provider} 与 {@code starter} 两个模块约
  *       15 个文件内，core 与全部契约测试一行不动；
  *   <li>core 里的计量、配额、熔断逻辑可以在不启动 Spring 容器的前提下被毫秒级单测覆盖， 而这正是「计量精度」这个护城河能被反复验证的前提；
- *   <li>CI 用 {@code dependency:list} 扫描本模块依赖树，出现 {@code org.springframework.*} 即构建失败。
+ *   <li>CI 用依赖树扫描本模块，出现 Spring 框架类型即构建失败。
  * </ul>
  *
  * <p>子包职责：

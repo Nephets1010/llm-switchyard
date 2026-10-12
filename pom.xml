@@ -78,7 +78,7 @@
     <!-- 架构文档 §7.1 写作 io.picocli，实际 Maven 坐标为 info.picocli（已实测 404 → 200），此处按实际坐标 -->
     <picocli.version>4.7.6</picocli.version>
     <wiremock.version>3.13.2</wiremock.version>
-    <assertj.version>3.27.3</assertj.version>
+    <assertj.version>3.27.7</assertj.version>
     <!-- 架构文档 §7.1 声明 resilience4j 2.3.0；首版刻意不实际引入（ADR-0002），仅保留 BOM 供 P1 使用 -->
     <resilience4j.version>2.3.0</resilience4j.version>
 

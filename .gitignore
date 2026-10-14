@@ -1,0 +1,41 @@
+# ---- Maven ----
+target/
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+dependency-reduced-pom.xml
+
+# ---- IDE ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+nb-configuration.xml
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- 运行期产物 ----
+*.log
+logs/
+*.pid
+*.exec.jar
+/application.yml.bak
+
+# ---- 计量精度测试的输出（10 万条流量误差报告，作为发版证据留档）----
+precision-report.json
+precision-report.md
+
+# ---- 敏感配置：仓库内绝不提交真实 API Key ----
+.env
+.env.*
+!.env.example
+**/application-local.yml
+**/application-local.yaml

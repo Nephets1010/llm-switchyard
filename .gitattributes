@@ -1,0 +1,23 @@
+# 行尾规范
+# mvnw / mvnw.cmd 若被转成 CRLF，Linux CI 上会报
+# "/bin/sh^M: bad interpreter" —— 必须强制 LF
+* text=auto eol=lf
+
+mvnw text eol=lf
+mvnw.cmd text eol=crlf
+
+# 二进制文件，禁止任何转换
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+
+# 归档/快照，diff 时不进入
+*.jar -diff
+*.png -diff
+*.gif -diff

@@ -1,0 +1,345 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同分支的新 push 直接取消旧构建，省 CI 配额
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MAVEN_VERSION: 3.9.9
+  JAVA_VERSION: '21'
+
+jobs:
+  # ============================================================
+  # Job 1：编译 + 单元测试 + 集成测试 + 覆盖率门禁
+  # ★ CI 零外部依赖：全部用 WireMock 与本仓 mock-llm，绝不调用真实 API、绝不产生费用
+  # ============================================================
+  verify:
+    # ★ 这里必须写死版本号，不能用 ${{ env.JAVA_VERSION }}。
+    #   job 的 name 字段在 workflow 解析的极早期求值，此时 env 尚未填充，
+    #   GitHub 会直接拒绝整个文件：
+    #     (Line: 28) Unrecognized named-value: 'env'
+    #   而且它会连带**后面所有 job 都创建不出来** —— 报错信息完全指不到真实原因。
+    #   env 只能用在 steps[].with / steps[].run 里（见下方 setup-java）。
+    name: verify (Java 21)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: 打印工具链版本
+        run: java -version && ./mvnw -version
+
+      - name: 缓存 Maven 依赖
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-
+
+      - name: 离线依赖预热
+        run: ./mvnw -B -ntp dependency:go-offline -DexcludeArtifactIds=switchyard-core,switchyard-provider,switchyard-starter,switchyard-mock-llm || true
+
+      # 覆盖率门禁（core ≥ 80% / provider ≥ 65% / 其余 ≥ 60%）在 jacoco:check 里，低于阈值本步即失败
+      - name: 编译 + 测试 + 覆盖率门禁
+        run: ./mvnw -B -ntp clean verify -Dstyle.color=never
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: '**/target/site/jacoco/index.html'
+          retention-days: 14
+
+      - name: 上传计量精度报告（10 万条流量的实测误差值）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metering-precision-report
+          path: '**/target/precision-report.*'
+          retention-days: 90
+
+  # ============================================================
+  # Job 2：格式检查（spotless 同时负责 Apache-2.0 许可证头）
+  # ============================================================
+  spotless:
+    name: spotless
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      # ★ 许可证头也由 spotless 的 licenseHeader 规则校验（见父 pom 的 spotless 配置），
+      #   因此不需要单独跑 license-maven-plugin —— Spring Boot parent 已占用那个 artifactId，
+      #   且它的 check 目标名不同，跑起来只会报「Could not find goal 'check'」这种无关错误。
+      - name: 检查代码格式与 Apache-2.0 许可证头（google-java-format AOSP）
+        run: ./mvnw -B -ntp spotless:check -Dstyle.color=never
+
+  # ============================================================
+  # Job 2b：workflow 自身语法门禁
+  # ★ 为什么需要这个 job：GitHub 解析 workflow 失败时是**整个文件拒绝、所有 job
+  #   一个都不创建**，而报错信息（"Unrecognized named-value: 'env'"、
+  #   "'run' is already defined"）完全指不到真实原因。更糟的是这类错误
+  #   在本地看不出来：YAML 同层重复键会被解析器静默取最后一个，mvn 也照样全绿。
+  #   首次上线时就是这个原因导致 5 个 job 全部无法创建。
+  # ============================================================
+  workflow-syntax:
+    name: workflow-syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ★ 必须显式装 PyYAML：actions/setup-python 只保证 python 解释器可用，
+      #   不带任何第三方包。缺它时 `import yaml` 直接 ModuleNotFoundError，
+      #   而脚本的报错是「Traceback 之后就没了」，看不出是缺依赖还是脚本坏了。
+      - name: 安装脚本依赖
+        run: python -m pip install --upgrade pip && python -m pip install "PyYAML==6.0.2"
+
+      - name: 静态校验（重复键 / env 作用域 / 本地脚本存在性）
+        run: python tools/validate_workflows.py
+
+      - name: 构建上下文完整性（.dockerignore 是否把 Dockerfile 需要的东西排除了）
+        # ★ 这一步能在【提交前】发现 compose-smoke 会在 CI 上遇到的
+        #   '"pom.xml": not found' 失败 —— 那类报错的现场信息极不友好：
+        #   BuildKit 在算 cache checksum 阶段就失败，一条 RUN 都没执行，
+        #   日志里完全看不出是 .dockerignore 的问题。
+        run: python tools/check_dockerignore.py --selftest && python tools/check_dockerignore.py
+
+      # actionlint 的解析器与 GitHub 服务端同源，是唯一能提前复现服务端
+      # 解析行为的工具。它是二进制，直接从 release 页取。
+      - name: actionlint（与 GitHub 服务端同源的解析器）
+        run: |
+          set -euo pipefail
+          VER=1.7.7
+          curl -sSL --max-time 60 \
+            -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${VER}/actionlint_${VER}_linux_amd64.tar.gz"
+          tar -xzf actionlint.tar.gz actionlint
+          # actionlint 的 -color 是布尔开关，不接受 '=never' 这种写法（会当成非法参数并打印帮助）。
+          # 禁用颜色用 -no-color。有任何输出即失败（actionlint 发现问题时输出并返回非 0）。
+          ./actionlint -no-color .github/workflows/*.yml
+          echo "actionlint 通过"
+
+
+  # ============================================================
+  # Job 3：契约一致性（§2.6）
+  # 三仓不共享 jar，只共享 contract/contract-v1.json 的语义。
+  # 这里跑 core 模块的 ContractSchemaTest，验证反射字段与契约文件逐字符一致。
+  # ============================================================
+  contract-consistency:
+    name: contract-consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: 契约字段 / 类型 / 枚举逐字符校验
+        run: ./mvnw -B -ntp -pl switchyard-core test -Dtest='ContractSchemaTest' -Dsurefire.failIfNoSpecifiedTests=false -Dstyle.color=never
+
+      - name: 校验契约文件是合法 JSON 且版本号受支持
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          with open('contract/contract-v1.json', encoding='utf-8') as f:
+              c = json.load(f)
+          assert c['contractVersion'] == 'v1', c['contractVersion']
+          need = {'CTX-001','USG-001','PRC-001','EVT-001','ERR-001','SPN-001'}
+          missing = need - set(c['contracts'])
+          assert not missing, f'契约缺失: {missing}'
+          for name, attrs in c['contracts'].items():
+              for a in attrs.get('customAttributes', []):
+                  assert a['name'].startswith('swy.'), f'{name} 的自定义属性必须用 swy. 前缀: {a["name"]}'
+          print('contract-v1.json 校验通过')
+          PY
+
+  # ============================================================
+  # Job 4：架构边界门禁
+  #   ① core 零 Spring 依赖  ② 依赖树不含另两个仓库的 groupId
+  # ============================================================
+  architecture-boundaries:
+    name: architecture-boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: core 模块禁止出现 Spring 依赖
+        # ★ 两条命令必须在同一个 run 块里。
+        #   写成两个平级的 `run:` 是无效的 —— YAML 同层键重复，后者静默覆盖前者，
+        #   于是 dependency:list 根本没执行，/tmp/core-deps.txt 从未生成。
+        #   而「文件不存在」时 grep 返回 2（非零），在 shell 默认语义下会让整个
+        #   `if` 判为「没匹配」→ 走 else 分支打印「边界完好」→
+        #   **门禁看起来在跑并报告通过，实际什么都没检查**。这是最坏的一类假绿。
+        #   所以下面先显式校验清单非空：判定不了就失败，绝不「默认通过」。
+        run: |
+          ./mvnw -B -ntp -pl switchyard-core dependency:list -DoutputFile=/tmp/core-deps.txt -DincludeScope=compile
+          if [ ! -s /tmp/core-deps.txt ]; then
+            echo "::error::dependency:list 未产出依赖清单，门禁无法判定（请勿用 -q 静默失败）"
+            exit 1
+          fi
+          if grep -E 'org\.springframework' /tmp/core-deps.txt; then
+            echo "::error::core 模块出现 Spring 依赖，违反 ADR-0005 的零框架依赖硬约束"
+            exit 1
+          fi
+          echo "core 依赖树中无 org.springframework.*，边界完好"
+
+      - name: 禁止依赖另两个 LLM 基建仓库与 LangGraph4j
+        run: |
+          ./mvnw -B -ntp dependency:tree -DoutputFile=/tmp/full-tree.txt
+          if [ ! -s /tmp/full-tree.txt ]; then
+            echo "::error::dependency:tree 未产出依赖树，门禁无法判定"
+            exit 1
+          fi
+          if grep -E 'agentswitchyard|glasshouse|langgraph4j' /tmp/full-tree.txt; then
+            echo "::error::依赖树中出现另两个仓库或 LangGraph4j，违反 ADR-0003"
+            exit 1
+          fi
+          echo "依赖树干净：无跨仓依赖、无图编排引擎"
+
+  # ============================================================
+  # Job 5：docker compose 零 Key 冒烟（10 万条计量精度测试在 Job 1 已跑）
+  # ============================================================
+  compose-smoke:
+    name: compose-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 compose 文件语法
+        run: docker compose config --quiet
+
+      # ★ --no-cache 不是为了「绕开缓存污染」，而是为了让失败可归因。
+      #   缓存命中时，如果 COPY 源在上下文里缺失，BuildKit 可能在算 checksum
+      #   阶段就报 '"pom.xml": not found'，而这个报错与「缓存来自别的 commit」
+      #   长得一模一样，无法区分。加 --no-cache 后每次都真算一遍，
+      #   失败就必然是本次上下文的问题。
+      #   代价是每次 CI 多花几分钟 —— 对一个 30 分钟的 job 可以接受。
+      - name: 构建并启动
+        run: docker compose build --no-cache && docker compose up -d
+
+      - name: 等待 mock-llm 就绪
+        run: |
+          # 用计数器而非 for i in ...：`i` 未被使用会触发 actionlint 的 shellcheck SC2034
+          attempts=0
+          while [ "$attempts" -lt 40 ]; do
+            if curl -fsS http://localhost:18081/__admin/health >/dev/null; then
+              echo "mock-llm 就绪"; exit 0
+            fi
+            attempts=$((attempts + 1))
+            sleep 3
+          done
+          echo "::error::mock-llm 120s 内未就绪"; docker compose logs; exit 1
+
+      - name: 等待 sample 就绪
+        run: |
+          # ★ depends_on: service_healthy 只保证 mock-llm 健康后 sample【开始启动】，
+          #   sample 自己的 Spring Boot 启动还要几秒。不等就 curl 会得到
+          #   'Connection reset by peer'（端口还没监听）。CI 实测复现过。
+          attempts=0
+          while [ "$attempts" -lt 40 ]; do
+            if curl -fsS http://localhost:18080/_switchyard/overview >/dev/null 2>&1; then
+              echo "sample 就绪"; exit 0
+            fi
+            attempts=$((attempts + 1))
+            sleep 3
+          done
+          echo "::error::sample 120s 内未就绪"; docker compose logs; exit 1
+
+      - name: 同步对话（验证计量非零、成本非零）
+        run: |
+          curl -fsS -XPOST http://localhost:18080/demo/chat \
+            -H 'Content-Type: application/json' \
+            -d '{"prompt":"你好，请用一句话介绍你自己"}' | tee /tmp/chat.json
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/chat.json', encoding='utf-8'))
+          assert d['usage']['totalTokens'] > 0, '同步请求计量为 0'
+          assert float(d['cost']['amountCny']) > 0, '成本为 0'
+          print('同步计量 OK, totalTokens =', d['usage']['totalTokens'])
+          "
+
+      - name: 流式对话（PRD 痛点 4 的核心验收：流式计量不得为 0）
+        run: |
+          curl -fsS -N -XPOST http://localhost:18080/demo/chat/stream \
+            -H 'Content-Type: application/json' \
+            -d '{"prompt":"讲个笑话"}' > /tmp/stream.txt
+          cat /tmp/stream.txt
+          python3 -c "
+          import json
+          chunks = 0; usage = None
+          for line in open('/tmp/stream.txt', encoding='utf-8'):
+              line = line.strip()
+              if not line.startswith('data:'): continue
+              body = line[5:].strip()
+              if body == '[DONE]': break
+              d = json.loads(body); chunks += 1
+              if d.get('usage'): usage = d['usage']
+          # ★ 断言语义对准 demo 的实际契约，而不是 mock 内部分片数：
+          #   /demo/chat/stream 是【聚合语义】（网关把整条流累积为一个响应后推送），
+          #   chunk 事件数取决于网关实现（实测为 1），不能断言 >= 3 ——
+          #   那是在断言 mock 的 split(content, 3) 内部实现，耦合了不该耦合的东西。
+          #   真正的验收点是 PRD 痛点 4：流式计量不为 0。
+          #   CI 实测教训：chunk 事件只有 1 个但 usage 事件完美
+          #   （totalTokens=50, streamUsageReported=true, 成本与 traceId 齐全），
+          #   旧断言把一个正确实现判成了失败。
+          assert chunks >= 2, f'SSE 事件数 {chunks} 过少（至少应有 chunk 事件与 usage 事件）'
+          assert usage is not None and usage['totalTokens'] > 0, '流式计量为 0 —— 这是 PRD 痛点 4，必须修复'
+          print('流式计量 OK, events =', chunks, ', totalTokens =', usage['totalTokens'])
+          "
+
+      - name: 控制台 overview 非空
+        run: |
+          curl -fsS http://localhost:18080/_switchyard/overview | tee /tmp/overview.json
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/overview.json', encoding='utf-8'))
+          for k in ('cost','tokens','circuitBreakers'):
+              assert k in d, f'overview 缺少 {k}'
+          print('控制台 OK')
+          "
+
+      - name: 收集日志
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: 关闭环境
+        if: always()
+        run: docker compose down -v

@@ -1,0 +1,540 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 The llm-switchyard Authors. Licensed under the Apache License, Version 2.0 (the "License"); see the
+  LICENSE file in the project root for the full license text.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+    父 POM：Spring Boot 3.5.16 + Spring AI 1.1.8 + Java 21
+    - Boot 3.5.16 是 3.5 线最后一个 OSS 补丁版本（OSS 支持已于 2026-06-30 结束），见 ADR-0005
+    - Spring AI 1.1.8 是 Spring Boot 3.x 对应线（Spring AI 2.0 只能配 Boot 4.x）
+  -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.16</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>io.github.nephets</groupId>
+  <artifactId>llm-switchyard</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>llm-switchyard</name>
+  <description>LLM Switchyard：Java 原生 LLM 网关，按成本/延迟/质量智能路由，Token 精确计量与配额熔断，进程内部署不需 sidecar</description>
+  <url>https://github.com/nephets/llm-switchyard</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <id>nephets</id>
+      <name>llm-switchyard maintainers</name>
+      <url>https://github.com/nephets</url>
+    </developer>
+  </developers>
+
+  <scm>
+    <url>https://github.com/nephets/llm-switchyard</url>
+    <connection>scm:git:https://github.com/nephets/llm-switchyard.git</connection>
+  </scm>
+
+  <modules>
+    <module>switchyard-core</module>
+    <module>switchyard-provider</module>
+    <module>switchyard-starter</module>
+    <module>switchyard-mock-llm</module>
+    <module>switchyard-sample</module>
+  </modules>
+
+  <!--
+    ★ 预先定义一个空的 argLine 属性。
+      surefire / failsafe 用 @{argLine} 引用它，jacoco:prepare-agent 在运行期把
+      -javaagent:... 注入进来。若不预先定义 argLine，@{argLine} 会保持字面量不被解析，
+      导致 jacoco 找不到执行数据 —— 覆盖率报告为空，而 check 规则会因「无数据」静默通过。
+      那比没有门禁更危险：它会让人误以为覆盖率已达标。
+  -->
+  <properties>
+    <argLine></argLine>
+    <java.version>21</java.version>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+    <!-- ==== 锁版本：禁止用浮动版本号 ==== -->
+    <spring-ai.version>1.1.8</spring-ai.version>
+    <spring-ai-alibaba.version>1.1.2.0</spring-ai-alibaba.version>
+    <!-- 架构文档 §7.1 写作 io.picocli，实际 Maven 坐标为 info.picocli（已实测 404 → 200），此处按实际坐标 -->
+    <picocli.version>4.7.6</picocli.version>
+    <wiremock.version>3.13.2</wiremock.version>
+    <assertj.version>3.27.3</assertj.version>
+    <!-- 架构文档 §7.1 声明 resilience4j 2.3.0；首版刻意不实际引入（ADR-0002），仅保留 BOM 供 P1 使用 -->
+    <resilience4j.version>2.3.0</resilience4j.version>
+
+    <spotless.version>2.44.4</spotless.version>
+    <google-java-format.version>1.25.2</google-java-format.version>
+    <jacoco.version>0.8.13</jacoco.version>
+
+    <!-- ==== 覆盖率门禁（架构文档 §8.6）==== -->
+    <!--
+      显式声明为 false：部分环境的 Maven 会给 jacoco.skip 注入默认值，
+      导致 report/check 被静默跳过 —— 覆盖率报告为空而构建照样成功，
+      这比没有门禁更危险（会让人误以为覆盖率已达标）。
+    -->
+    <jacoco.skip>false</jacoco.skip>
+    <jacoco.line.minimum>0.60</jacoco.line.minimum>
+    <jacoco.line.minimum.core>0.80</jacoco.line.minimum.core>
+    <jacoco.line.minimum.provider>0.65</jacoco.line.minimum.provider>
+    <!--
+      ★ jacoco 执行数据的存放目录。必须是【纯 ASCII 路径】：
+      Windows 上 -javaagent 的 destfile 参数一旦含非 ASCII 字符就会被截断在第一个非 ASCII 处
+      （本项目实测 D:\data\WorkBuddy\程序宇宙\… 被截成 D:\data\WorkBuddy\），
+      随后 jacoco 静默丢失执行数据，report/check 因「无数据」而假通过 ——
+      一个会骗过 CI 的门禁比没有门禁更危险。
+
+      之所以不用 ${project.build.directory}：本仓库路径含中文，在 Windows 上必被截断；
+      之所以不用 ${java.io.tmpdir}：它解析到用户目录，同样可能含中文。
+      每个模块用 artifactId 命名，避免多模块互相覆盖。
+
+      ★★ 真正的坑是这个目录【在项目之外】，mvn clean 不会清它，于是上一轮遗留的
+        .exec 会被下一轮的 report/check 读进去，得出「上一轮的覆盖率」。
+        本项目实测踩过：switchyard-starter 的测试早已被删光（0 个测试类），
+        但因为 11 小时前遗留的 starter.exec 还在，check 拿它算出 45.1% 并报
+        「覆盖率 45% < 60%」—— 一个既真实又无意义的失败。
+        对策是每次构建在 initialize 阶段先删掉自己的 .exec
+        （见下方 maven-antrun-plugin 配置），保证覆盖率只反映本次构建。
+        CI（Linux）与本地都可用 -Djacoco.dest.dir=<纯 ASCII 路径> 覆盖。
+    -->
+    <jacoco.dest.dir>C:/Users/Public/swy-jacoco/${project.artifactId}.exec</jacoco.dest.dir>
+    <!-- 父 pom（packaging=pom）没有测试执行数据，显式跳过 report/check -->
+    <jacoco.report.skip>true</jacoco.report.skip>
+    <!--
+      测试 JVM 堆大小。显式设限的原因：MeteringAccuracyTest 要跑满 10 万条构造流量，
+      JVM 默认堆在内存受限的机器/容器上会被判定为「虚拟空间不足」而直接崩溃，
+      且报错信息完全指不到真实原因（只说 forked VM terminated）。
+      512m 足以跑完 10 万条用例；内存更紧张的机器可用 -Dswy.test.heap=256m 覆盖。
+    -->
+    <swy.test.heap>512m</swy.test.heap>
+    <swy.failsafe.heap>768m</swy.failsafe.heap>
+    <!--
+      ★ jacoco 执行数据的唯一路径定义（agent 写入、report 读取、check 校验都用它）。
+      曾经有三处各自硬编码路径，其中一处被改成 tmpdir 而另两处没改，
+      结果是「agent 明明写了数据，check 却说找不到」—— 排查了两轮才发现是配置不一致。
+      现在只有一个属性，三处全部引用它，改一处即可生效。
+    -->
+    <jacoco.data.file>${project.build.directory}/${project.artifactId}.exec</jacoco.data.file>
+    <!--
+      临时关闭覆盖率门禁（本地快速迭代时用）：-Djacoco.coverage=off
+      它同时控制 profile 的激活 —— 关掉 profile 就等于没有 report 也没有 check，
+      这是「明确知道自己在关掉什么」的诚实做法，而不是留一个半开的门。
+    -->
+    <jacoco.coverage>enabled</jacoco.coverage>
+    <!-- 为什么覆盖率用 property 激活而不是文件激活：见 jacoco-coverage profile 内的说明 -->
+
+    <!-- ==== 精确构建参数 ==== -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-bom</artifactId>
+        <version>${spring-ai.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.alibaba.cloud.ai</groupId>
+        <artifactId>spring-ai-alibaba-bom</artifactId>
+        <version>${spring-ai-alibaba.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-bom</artifactId>
+        <version>${resilience4j.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- 本仓模块 -->
+      <dependency>
+        <groupId>io.github.nephets</groupId>
+        <artifactId>switchyard-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.nephets</groupId>
+        <artifactId>switchyard-provider</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.nephets</groupId>
+        <artifactId>switchyard-starter</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.nephets</groupId>
+        <artifactId>switchyard-mock-llm</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- 三方 -->
+      <dependency>
+        <groupId>info.picocli</groupId>
+        <artifactId>picocli</artifactId>
+        <version>${picocli.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.assertj</groupId>
+        <artifactId>assertj-core</artifactId>
+        <version>${assertj.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.wiremock</groupId>
+        <artifactId>wiremock-standalone</artifactId>
+        <version>${wiremock.version}</version>
+        <scope>test</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <!--
+    ★ 刻意不在父 POM 的 <dependencies> 里声明通用依赖。
+      若在此声明 spring-boot-starter-test，则 core 模块 dependency:analyze 必然报出
+      一堆「声明未使用」的传递依赖（spring-test/mockito/json-path），让「core 零 Spring 依赖」
+      这条边界无法用机器判定。各子模块按需显式声明自己真正用到的依赖。
+  -->
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <configuration>
+            <release>${maven.compiler.release}</release>
+            <parameters>true</parameters>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <configuration>
+            <includes>
+              <include>**/*Test.java</include>
+            </includes>
+            <excludes>
+              <exclude>**/*IT.java</exclude>
+            </excludes>
+            <!--
+              显式限制 fork 出的测试 JVM 堆大小（见 properties 中 swy.test.heap 的说明）。
+              @{argLine} 占位符保证 jacoco 注入的 agent 参数不会被覆盖。
+            -->
+            <argLine>@{argLine} -Xmx${swy.test.heap} -Xms64m -XX:+ExitOnOutOfMemoryError</argLine>
+            <!--
+              ★ 显式指定 fork 的工作目录：jacoco agent 的相对 destFile 正是按它解析的。
+              不指定时不同 Maven/surefire 版本解析基准不同（有的按 reactor 根、有的按模块目录），
+              导致执行数据找不到、覆盖率门禁静默失效。这里钉死为当前模块目录。
+            -->
+            <workingDirectory>${project.basedir}</workingDirectory>
+            <forkCount>1</forkCount>
+            <reuseForks>true</reuseForks>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <configuration>
+            <includes>
+              <include>**/*IT.java</include>
+            </includes>
+            <argLine>@{argLine} -Xmx${swy.failsafe.heap}</argLine>
+            <workingDirectory>${project.basedir}</workingDirectory>
+            <forkCount>1</forkCount>
+            <reuseForks>true</reuseForks>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>${jacoco.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>com.diffplug.spotless</groupId>
+          <artifactId>spotless-maven-plugin</artifactId>
+          <version>${spotless.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <!--
+        ==== 每次构建先清空本模块的 jacoco .exec ====
+        ★ 为什么必须显式清：jacoco.dest.dir 在项目之外（为了绕开中文路径），
+          mvn clean 管不到那里。残留的 .exec 会被下一轮的 report/check 读进去，
+          于是覆盖率反映的是【上一次】构建 —— 既可能是早已删除的测试留下的
+          （本项目实测：starter 测试全删了，却因 11 小时前的残留算出 45.1%），
+          也可能让本次的新测试「白写」（数据被旧数据稀释）。
+          覆盖率报告的唯一价值是反映当前代码，混入历史数据等于毁掉它。
+
+          用 antrun 的 delete 而不是 build-helper：antrun 能按文件精确删除，
+          而 build-helper 只擅长生成源码目录。
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>clean-stale-jacoco-data</id>
+            <!--
+              ★ 必须绑在 initialize（早于 prepare-agent），否则本轮 agent
+                写出的数据会被自己删掉。
+            -->
+            <phase>initialize</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <target>
+                <!--
+                  failonerror=false：CI 上是 Linux 路径（/tmp/...），
+                  删一个不存在的文件不该让构建失败。
+                -->
+                <delete file="${jacoco.dest.dir}" failonerror="false" quiet="true"/>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- ==== 强制 Java 21 与 Maven 版本，避免用错 JDK 得到「能编译但跑不起来」的产物 ==== -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-build-environment</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[21,22)</version>
+                  <message>本项目需要 JDK 21（使用虚拟线程与 record pattern）。当前 JAVA_HOME=$(java.home)</message>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[3.9.9,)</version>
+                </requireMavenVersion>
+                <bannedDependencies>
+                  <searchTransitive>false</searchTransitive>
+                  <excludes>
+                    <!-- 决策 4：三仓互相不依赖，此处机器化守住 -->
+                    <exclude>io.github.nephets:agentswitchyard*</exclude>
+                    <exclude>io.github.nephets:glasshouse*</exclude>
+                    <exclude>org.bsc.langgraph4j:*</exclude>
+                    <exclude>tools.jackson:*</exclude>
+                  </excludes>
+                  <message>禁止引入另两个 LLM 基建仓库或 LangGraph4j / Jackson 3，理由见 ADR-0003</message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- ==== 统一代码格式：google-java-format，CI 用 check 阻断 ==== -->
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>spotless-apply</id>
+            <goals>
+              <goal>apply</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <java>
+            <includes>
+              <include>src/main/java/**/*.java</include>
+              <include>src/test/java/**/*.java</include>
+            </includes>
+            <googleJavaFormat>
+              <version>${google-java-format.version}</version>
+              <style>AOSP</style>
+            </googleJavaFormat>
+            <removeUnusedImports/>
+            <importOrder>
+              <order>com,io,org,javax,java,\#</order>
+            </importOrder>
+          </java>
+          <formats>
+            <format>
+              <includes>
+                <include>*.md</include>
+                <include>docs/**/*.md</include>
+              </includes>
+              <trimTrailingWhitespace/>
+              <endWithNewline/>
+            </format>
+          </formats>
+        </configuration>
+      </plugin>
+
+      <!-- ==== Apache-2.0 许可证头校验 ==== -->
+
+      <!-- ==== 覆盖率：core ≥ 80%，provider ≥ 65%，其余 ≥ 60% ==== -->
+
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+            <configuration>
+              <!--
+                destfile 直接写 target/。
+                曾经绕道 tmpdir 是为了规避「中文路径下 -javaagent 参数被截断」，
+                但那样 clean 会把 tmpdir 里的数据一起删掉 —— 而且真正需要规避的是
+                report 阶段的路径问题，不是 agent 写文件的问题。
+                相对路径由 JVM 按工作目录解析，不受 -javaagent 参数里的绝对路径编码影响。
+              -->
+              <destFile>${jacoco.dest.dir}</destFile>
+              <append>false</append>
+            </configuration>
+          </execution>
+          <execution>
+            <id>prepare-agent-integration</id>
+            <goals>
+              <goal>prepare-agent-integration</goal>
+            </goals>
+            <configuration>
+              <!--
+                ★ 集成测试的数据「追加」到与单元测试相同的文件，而不是另存 -it.exec 再 merge。
+                理由：jacoco:merge 的 fileSet 语义在「某些文件不存在」时会直接报 fileSets 缺失
+                （core 模块就没有 *IT.java），踩过一次就够了。让两份数据自然累积到一个文件，
+                既省掉 merge 这一步，也彻底消除那类只在特定模块组合下复现的构建故障。
+              -->
+              <destFile>${jacoco.dest.dir}</destFile>
+              <append>true</append>
+            </configuration>
+          </execution>
+          <execution>
+            <!--
+              覆盖率报告与门禁。刻意直接放在父 <build><plugins> 而不是 profile：
+              profile 的 <property> 激活只看「声明该属性的那个 POM 自己」，
+              子模块里设 <jacoco.coverage> 不会激活父 pom 里的 profile（实测全部静默不生效），
+              而一个「看起来配了、实际从不执行」的门禁比没有门禁更危险。
+              父 pom（packaging=pom）没有执行数据，用 <skip> 显式跳过。
+            -->
+            <id>coverage-report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+            <configuration>
+              <dataFile>${jacoco.dest.dir}</dataFile>
+              <formats>
+                <format>HTML</format>
+                <format>XML</format>
+                <format>CSV</format>
+              </formats>
+            </configuration>
+          </execution>
+          <execution>
+            <id>coverage-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <haltOnFailure>true</haltOnFailure>
+              <dataFile>${jacoco.dest.dir}</dataFile>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${jacoco.line.minimum}</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!--
+      ================================================================
+      覆盖率 profile：只对「有 src/main/java 的 jar 模块」生效。
+      ================================================================
+      为什么放在 profile 而不是父 <plugins>：
+        父 pom 是 packaging=pom，不产出任何测试执行数据。jacoco:merge 在 0.8.13 下
+        不认 <skip> 参数，一旦在父 <plugins> 里声明就会因「fileSets 缺失」让整个 reactor 失败。
+        用基于 <exists> 的自动激活，让 jar 模块自动获得这段逻辑、父 pom 自动跳过，
+        比用一个「记得手动加 -Dskip.merge=true」的开关可靠 —— 后者会在某次重构里被忘掉。
+
+      这里做两件事，缺一不可：
+        1. merge：把单元测试（*.exec）与集成测试（*-it.exec）的数据合并。
+           ★ provider / starter / sample 的核心逻辑大量在 IT 里（WireMock、真实 HTTP 链路），
+             不合并的话这些模块的覆盖率会显示为 0，门禁直接失效。
+        2. report + check：用合并后的数据出报告并执行覆盖率门禁。
+      ================================================================
+    -->
+
+    <!-- 跨模块覆盖率汇总报告：mvn -Pcoverage verify 后看 target/site/jacoco-aggregate/index.html -->
+    <profile>
+      <id>coverage</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>aggregate-report</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>report-aggregate</goal>
+                </goals>
+                <configuration>
+                  <outputDirectory>${project.build.directory}/site/jacoco-aggregate</outputDirectory>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

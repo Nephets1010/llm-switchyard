@@ -1,0 +1,23 @@
+# switchyard-sample 在 docker compose 下的覆盖配置
+#
+# 差异只在两处：
+#   1. 供应商 base-url 指向 compose 网络里的 mock-llm 服务名（不是 localhost）
+#   2. 审计改为 LOGGING（容器里看 stdout 更方便）
+spring:
+  config:
+    activate:
+      on-profile: compose
+
+llm:
+  switchyard:
+    providers:
+      openai:
+        base-url: http://mock-llm:18081/v1
+      deepseek:
+        base-url: http://mock-llm:18081/v1
+      dashscope:
+        base-url: http://mock-llm:18081/v1
+      ollama:
+        base-url: http://mock-llm:18081
+    audit:
+      type: LOGGING

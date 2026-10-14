@@ -1,0 +1,41 @@
+# Mock LLM 服务配置（零 API Key，CI 与 demo 共用）
+server:
+  port: ${SERVER_PORT:18081}
+  # 本地模型场景故意不 shutdown，保证 SSE 场景不会在响应中途被优雅关闭打断
+  shutdown: immediate
+
+spring:
+  application:
+    name: switchyard-mock-llm
+  main:
+    banner-mode: off
+  mvc:
+    async:
+      # SSE 需要的超时；demo 里故意给很大，模拟真实推理耗时
+      request-timeout: 120s
+  webflux:
+    problemdetails:
+      enabled: false
+
+logging:
+  level:
+    root: WARN
+    io.github.nephets.switchyard.mockllm: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+# mock 行为开关
+mock:
+  # deterministic：usage 由 prompt 长度确定性推导（测试与 demo 都用它，保证可精确断言）
+  # random：按随机数生成（仅用于手工把玩）
+  usage-mode: deterministic
+  latency-ms: ${SWY_MOCK_LATENCY_MS:0}

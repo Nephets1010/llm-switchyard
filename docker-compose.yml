@@ -1,0 +1,84 @@
+# llm-switchyard 一键体验环境
+#
+#   docker compose up --build
+#   curl -XPOST localhost:18080/demo/chat -H 'Content-Type: application/json' -d '{"prompt":"你好"}'
+#   curl localhost:18080/_switchyard/overview
+#
+# ★ 零 API Key：所有供应商端点都指向本 compose 内的 mock-llm。
+# ★ 零费用：CI 与 demo 都不会调用任何真实供应商 API。
+
+services:
+  mock-llm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-switchyard/mock-llm:0.1.0
+    container_name: swy-mock-llm
+    command: ["java", "-Dspring.config.name=mock-llm", "-jar", "/app/mock-llm.jar"]
+    environment:
+      # 让 mock 的 usage 工厂输出「可预测」数值，demo 里能自己核对计量结果
+      SWY_MOCK_USAGE_MODE: deterministic
+      SWY_MOCK_LATENCY_MS: "120"
+    ports:
+      - "18081:18081"
+    healthcheck:
+      # ★ 用 bash 内建的 /dev/tcp 而不是 wget/curl：
+      #   eclipse-temurin:21-jre-jammy 里没有 wget 也没有 curl，而 Dockerfile
+      #   刻意不做 apt install（为了保持 runtime 镜像最小、无包管理器依赖）。
+      #
+      #   ★★ 两个坑，都真实踩过：
+      #   1) 不能用 CMD wget —— 镜像里没有 wget，healthcheck 永远 unhealthy，
+      #      sample 因 depends_on: service_healthy 一直不启动，
+      #      日志只显示「sample 一直在 restarting」，完全指不到 healthcheck 这一行。
+      #   2) 不能用 CMD-SHELL 执行 /dev/tcp —— CMD-SHELL 用 /bin/sh 跑，
+      #      Ubuntu 的 /bin/sh 是 dash，dash 不支持 /dev/tcp（那是 bash 特性）。
+      #      CI 实测：应用 1.5 秒就启动成功，但 healthcheck 探测 106 秒全部失败，
+      #      最终被判 unhealthy —— 应用日志一切正常，极难归因。
+      #      所以必须用 CMD 显式调用 bash -c。
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/localhost/18081 &&
+          printf 'GET /__admin/health HTTP/1.0\r\n\r\n' >&3 &&
+          head -1 <&3 | grep -q '200'
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  sample:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-switchyard/sample:0.1.0
+    container_name: swy-sample
+    command: ["java", "-jar", "/app/sample.jar"]
+    environment:
+      SPRING_PROFILES_ACTIVE: compose
+      # compose profile 下全部供应商指向 compose 内的 mock-llm
+      SWY_PROVIDER_BASE_URL: http://mock-llm:18081
+    ports:
+      - "18080:18080"
+    depends_on:
+      mock-llm:
+        condition: service_healthy
+    healthcheck:
+      # ★ 探测 /_switchyard/overview 而不是 /actuator/health：
+      #   sample 没有引入 spring-boot-starter-actuator，那个端点根本不存在（返回 404），
+      #   healthcheck 会永远 unhealthy。而 /_switchyard/overview 是 starter 自带的
+      #   控制台端点，真实存在且不依赖任何额外依赖。
+      #   同时它顺带证明了「网关已装配且可用」，比单纯探活更有价值。
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/localhost/18080 &&
+          printf 'GET /_switchyard/overview HTTP/1.0\r\n\r\n' >&3 &&
+          head -1 <&3 | grep -q '200'
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s

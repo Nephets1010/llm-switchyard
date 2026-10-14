@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 The llm-switchyard Authors. Licensed under the Apache License, Version 2.0 (the "License"); see the
+  LICENSE file in the project root for the full license text.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.nephets</groupId>
+    <artifactId>llm-switchyard</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>switchyard-mock-llm</artifactId>
+  <name>switchyard-mock-llm</name>
+  <description>零成本假后端：OpenAI / Anthropic / Ollama 三协议端点 + 7 个故障场景注入 + 可预测 usage 工厂。同时是 CI 的假后端与 docker compose demo 的一键启动单元。</description>
+
+  <dependencies>
+    <!--
+      ★ 用 Web MVC（starter-web）而不是 WebFlux：这是本项目实测踩坑后的结论。
+
+      原本用 WebFlux 写 SSE 更自然，但它传递依赖 starter-web，两个 web 栈同时在
+      classpath 上时 Spring Boot 的 WebApplicationType 判定**默认选 MVC**，
+      mock-llm 于是以 MVC 启动 —— 而端点返回 Flux，MVC 没有对应的 converter，
+      SSE 端点直接 500。
+
+      症状却出现在 sample 侧（"连不上 mock-llm"、ClosedChannelException），
+      报错完全指不到「两个 web 栈打架」这个真实原因，排查了三轮。
+
+      现在两个模块统一用 MVC + SseEmitter：
+        - web 栈一致，测试期与 docker compose 中的行为完全相同；
+        - SseEmitter 在 MVC 下是官方推荐的 SSE 写法，语义清晰；
+        - mock 的连接数是测试级别的，不需要虚拟线程之外的特殊调度。
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- provider 层只作为测试期被测对象/被调用方，不参与 mock-llm 的运行时 -->
+    <dependency>
+      <groupId>io.github.nephets</groupId>
+      <artifactId>switchyard-provider</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <classifier>exec</classifier>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+  <properties>
+    <!-- 本模块有测试执行数据，执行覆盖率报告与门禁 -->
+    <jacoco.report.skip>false</jacoco.report.skip>
+  </properties>
+</project>

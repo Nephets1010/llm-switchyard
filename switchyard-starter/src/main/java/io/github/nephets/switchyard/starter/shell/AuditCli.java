@@ -79,18 +79,18 @@ public class AuditCli implements Runnable {
 
         if ("json".equalsIgnoreCase(format)) {
             for (AuditEvent event : filtered) {
-                System.out.println(toJson(event));
+                CliConsole.println(toJson(event));
             }
             return;
         }
 
-        System.out.printf(
+        CliConsole.printf(
                 "%-34s %-10s %8s %8s %-17s %12s %s%n",
                 "TRACED", "TENANT", "INPUT", "OUTPUT", "SOURCE", "COST(CNY)", "MODEL");
-        System.out.println("-".repeat(120));
+        CliConsole.println("-".repeat(120));
         for (AuditEvent event : filtered) {
             var usage = event.usage();
-            System.out.printf(
+            CliConsole.printf(
                     "%-34s %-10s %8d %8d %-17s %12s %s%n",
                     event.traceId(),
                     event.tenantId() == null ? "-" : event.tenantId(),
@@ -100,8 +100,8 @@ public class AuditCli implements Runnable {
                     event.costAmount().setScale(4, java.math.RoundingMode.HALF_UP).toPlainString(),
                     "-");
         }
-        System.out.println();
-        System.out.println(
+        CliConsole.println();
+        CliConsole.println(
                 "提示：审计默认不落 prompt 原文（见 docs/configuration.md 的 llm.switchyard.audit.capture-payload）。");
         return;
     }
@@ -158,7 +158,7 @@ public class AuditCli implements Runnable {
                 default -> throw new IllegalArgumentException("无法识别的时间单位：" + unit);
             };
         } catch (RuntimeException ex) {
-            System.err.println("--since 格式应为 30m/2h/7d，实际为: " + value + "，按不限时间处理");
+            CliConsole.errPrintln("--since 格式应为 30m/2h/7d，实际为: " + value + "，按不限时间处理");
             return Instant.EPOCH;
         }
     }

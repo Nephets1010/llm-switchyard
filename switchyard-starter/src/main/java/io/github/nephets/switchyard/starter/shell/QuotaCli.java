@@ -61,10 +61,10 @@ public class QuotaCli implements Runnable {
 
         if (model == null || model.isBlank()) {
             // 未指定模型时打印所有已配置路由的主模型配额
-            System.out.printf(
+            CliConsole.printf(
                     "%-12s %-34s %14s %14s %14s %8s%n",
                     "TENANT", "MODEL", "USED", "LIMIT", "REMAINING", "UTIL%");
-            System.out.println("-".repeat(102));
+            CliConsole.println("-".repeat(102));
             parent.router()
                     .routeNames()
                     .forEach(
@@ -98,7 +98,7 @@ public class QuotaCli implements Runnable {
         String limit = snapshot.unlimited() ? "unlimited" : String.valueOf(snapshot.limit());
         String remaining =
                 snapshot.unlimited() ? "unlimited" : String.valueOf(snapshot.remaining());
-        System.out.printf(
+        CliConsole.printf(
                 "%-12s %-34s %14s %14s %14s %7.1f%%%n",
                 tenantText,
                 modelText,
@@ -167,7 +167,7 @@ public class QuotaCli implements Runnable {
 
             var quotaStore = parent.quotaStore();
             if (quotaStore == null) {
-                System.err.println("配额存储未装配，无法设置配额");
+                CliConsole.errPrintln("配额存储未装配，无法设置配额");
                 return;
             }
             var periodValue =
@@ -185,13 +185,13 @@ public class QuotaCli implements Runnable {
                                     : io.github.nephets.switchyard.core.quota.OverLimitBehavior
                                             .FAIL_SOFT));
 
-            System.out.printf("已设置配额：%s 上限=%d 周期=%s%n", key.text(), limit, periodValue);
+            CliConsole.printf("已设置配额：%s 上限=%d 周期=%s%n", key.text(), limit, periodValue);
             printRow(effectiveTenant, ref.text(), parent.snapshotOf(key));
             return;
         }
 
         private void printRow(String tenantText, String modelText, QuotaSnapshot snapshot) {
-            System.out.printf(
+            CliConsole.printf(
                     "%-12s %-34s %14s %14s %14s %7.1f%%%n",
                     tenantText,
                     modelText,

@@ -45,30 +45,30 @@ public class DoctorCli implements Runnable {
     public void onCommand() {
         int problems = 0;
 
-        System.out.println("=== 1. 路由配置 ===");
+        CliConsole.println("=== 1. 路由配置 ===");
         var routes = parent.router().routeNames();
         if (routes.isEmpty()) {
-            System.out.println("  [问题] 没有任何路由配置：请设置 llm.switchyard.routes.<name>.primary");
+            CliConsole.println("  [问题] 没有任何路由配置：请设置 llm.switchyard.routes.<name>.primary");
             problems++;
         } else {
             routes.forEach(this::describeRoute);
         }
 
-        System.out.println();
-        System.out.println("=== 2. 价格表 ===");
+        CliConsole.println();
+        CliConsole.println("=== 2. 价格表 ===");
         int priceEntries = parent.pricingTable().size();
-        System.out.println("  已加载价格条目：" + priceEntries);
+        CliConsole.println("  已加载价格条目：" + priceEntries);
         if (priceEntries == 0) {
-            System.out.println("  [问题] 价格表为空：成本将为 0，检查 switchyard-prices.yml 是否可读");
+            CliConsole.println("  [问题] 价格表为空：成本将为 0，检查 switchyard-prices.yml 是否可读");
             problems++;
         }
 
-        System.out.println();
-        System.out.println("=== 3. 供应商目录 ===");
+        CliConsole.println();
+        CliConsole.println("=== 3. 供应商目录 ===");
         parent.router().catalog().all().forEach(this::describeProvider);
 
-        System.out.println();
-        System.out.println("=== 4. 模型健康 ===");
+        CliConsole.println();
+        CliConsole.println("=== 4. 模型健康 ===");
         // 用 AtomicInteger 而非 int：lambda 里需要自增，普通局部变量不是 effectively final
         java.util.concurrent.atomic.AtomicInteger modelProblems =
                 new java.util.concurrent.atomic.AtomicInteger();
@@ -76,7 +76,7 @@ public class DoctorCli implements Runnable {
         health.forEach(
                 (model, item) -> {
                     String mark = item.available() ? "[正常]" : "[熔断]";
-                    System.out.printf(
+                    CliConsole.printf(
                             "  %s %-34s state=%-9s calls=%d failureRate=%.0f%% price=%s%n",
                             mark,
                             item.model(),
@@ -90,32 +90,32 @@ public class DoctorCli implements Runnable {
                 });
         problems += modelProblems.get();
         if (resetBreakers) {
-            System.out.println(
+            CliConsole.println(
                     "  （--reset-breakers 已指定：可通过重启网关或调用 CircuitBreakerRegistry.resetAll() 重置）");
         }
 
-        System.out.println();
+        CliConsole.println();
         if (problems == 0) {
-            System.out.println("结论：未发现问题");
+            CliConsole.println("结论：未发现问题");
             return;
         }
-        System.out.println("结论：发现 " + problems + " 处问题，见上方 [问题] / [熔断] 标记");
+        CliConsole.println("结论：发现 " + problems + " 处问题，见上方 [问题] / [熔断] 标记");
         return;
     }
 
     private void describeRoute(String routeName) {
         var route = parent.router().properties().getRoutes().get(routeName);
         if (route == null || route.getPrimary() == null) {
-            System.out.printf("  [问题] 路由 %s 未配置 primary%n", routeName);
+            CliConsole.printf("  [问题] 路由 %s 未配置 primary%n", routeName);
             return;
         }
-        System.out.printf(
+        CliConsole.printf(
                 "  %s → 主模型 %s，降级链 %s%n",
                 routeName,
                 route.getPrimary(),
                 route.getFallbacks().isEmpty() ? "(无)" : String.join(" → ", route.getFallbacks()));
         if (route.getFallbacks().isEmpty()) {
-            System.out.println("      提示：该路由没有降级链，上游故障时将直接失败（P1 会提供动态降权）");
+            CliConsole.println("      提示：该路由没有降级链，上游故障时将直接失败（P1 会提供动态降权）");
         }
     }
 
@@ -127,7 +127,7 @@ public class DoctorCli implements Runnable {
                 configured != null && configured.getBaseUrl() != null
                         ? configured.getBaseUrl()
                         : entry.defaultBaseUrl();
-        System.out.printf(
+        CliConsole.printf(
                 "  %-12s 协议=%-18s %s  baseUrl=%s 能力=%s%n",
                 entry.alias(), entry.protocol(), keyState, baseUrl, entry.capabilities().names());
     }

@@ -63,11 +63,10 @@ public class SwitchyardCli implements Runnable {
     /**
      * picocli 约定的命令入口：根命令不带子命令时打印用法。
      *
-     * <p>刻意用 {@code System.out}（而非在类加载时缓存的引用）：测试与嵌入式场景都可能 在运行期替换 {@code
-     * System.out}，缓存引用会让输出跑到错误的地方。
+     * <p>输出走 {@link CliConsole}，与其余子命令共用同一个出口。 为什么不能缓存流，见 {@link CliConsole#out()}。
      */
     public void onCommand() {
-        CommandLine.usage(this, System.out);
+        CommandLine.usage(this, CliConsole.out());
     }
 
     /**

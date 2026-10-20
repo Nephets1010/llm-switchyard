@@ -61,8 +61,6 @@ class MeteringAccuracyTest {
 
         long vendorReportedCount = 0L;
         long estimatedCount = 0L;
-        long cachedCount = 0L;
-        long reasoningCount = 0L;
         long streamingCount = 0L;
         long zeroMeteredStreaming = 0L;
 
@@ -92,12 +90,6 @@ class MeteringAccuracyTest {
 
             Usage usage = normalizer.normalize(raw, ctx, estimator);
 
-            if (record.cachedInputTokens() > 0) {
-                cachedCount++;
-            }
-            if (record.reasoningTokens() > 0) {
-                reasoningCount++;
-            }
             if (usage.usageSource() == UsageSource.VENDOR_REPORTED) {
                 vendorReportedCount++;
             } else {
@@ -119,41 +111,6 @@ class MeteringAccuracyTest {
         long meteredTotal = meteredInputTotal + meteredOutputTotal;
 
         double errorPercent = errorPercent(trueTotal, meteredTotal);
-
-        // 输出实测误差值：这份输出会被 CI 收集为 artifact，README 里的数字来自这里
-        System.out.printf(
-                Locale.ROOT,
-                "%n========== 计量精度验收报告 ==========%n"
-                        + "构造流量条数        : %,d%n"
-                        + "账单真值 token 总数 : %,d (input %,d + output %,d)%n"
-                        + "网关计量 token 总数 : %,d (input %,d + output %,d)%n"
-                        + "绝对误差            : %,d token%n"
-                        + "★ 实测相对误差      : %.6f%%  (上限 %.1f%%)%n"
-                        + "供应商回报条数      : %,d%n"
-                        + "估算兜底条数        : %,d%n"
-                        + "含缓存命中条数      : %,d%n"
-                        + "含推理 token 条数   : %,d%n"
-                        + "流式请求条数        : %,d%n"
-                        + "★ 流式计量为 0 条数 : %,d%n"
-                        + "结论                : %s%n"
-                        + "=====================================%n",
-                TRAFFIC_SIZE,
-                trueTotal,
-                trueInputTotal,
-                trueOutputTotal,
-                meteredTotal,
-                meteredInputTotal,
-                meteredOutputTotal,
-                Math.abs(meteredTotal - trueTotal),
-                errorPercent,
-                MAX_ERROR_PERCENT,
-                vendorReportedCount,
-                estimatedCount,
-                cachedCount,
-                reasoningCount,
-                streamingCount,
-                zeroMeteredStreaming,
-                errorPercent < MAX_ERROR_PERCENT && zeroMeteredStreaming == 0 ? "PASS" : "FAIL");
 
         writeReport(
                 trueTotal,
@@ -215,11 +172,12 @@ class MeteringAccuracyTest {
         }
 
         double error = errorPercent(trueTotal, estimatedTotal);
-        System.out.printf(Locale.ROOT, "中文场景估算器相对误差: %.3f%%%n", error);
 
         // 字符启发式不是分词器，不可能做到 0.5%；这条断言锁住的是「误差必须在一个可解释的量级内」，
         // 避免有人把启发式参数改成一个明显离谱的值而不被发现。
-        assertThat(error).as("启发式估算误差应在 100%% 以内（超过说明参数被改坏了）").isLessThan(100d);
+        assertThat(error)
+                .as("启发式估算对中文场景的实测相对误差为 %.3f%%，应在 100%% 以内（超过说明参数被改坏了）", error)
+                .isLessThan(100d);
         assertThat(error).as("估算不应严重高估（会浪费配额）").isGreaterThan(-50d);
     }
 

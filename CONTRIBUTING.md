@@ -64,6 +64,7 @@ test: 补 400 不重试的边界用例
 | **`totalTokens` 一律本仓重算** | 拷贝上游会因各家口径不同而对不上账 | `UsageContractSchemaTest` |
 | **不要给业务代码引入必须的新 API** | 嵌入式网关的价值就是「零侵入」 | 装饰器模式：`ChatModel` 的来源变化是唯一侵入点 |
 | **审计默认不落 prompt 原文** | PII 泄露风险 | `AuditEventContractTest` |
+| **命令结果只能由 `CliConsole` 写出；其余主源码零标准流直写** | 日志走 SLF4J 会随 Boot 默认配置落到 stdout，污染命令结果的机器解析（4fe6494 加过一次、当天回退）；`printStackTrace` 同理 | `StdoutHygieneTest`（每次 `mvn verify` 跑） |
 
 ## 最需要帮助的两个方向
 
